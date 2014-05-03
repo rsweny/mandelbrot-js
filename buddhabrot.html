@@ -2,25 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>The Mandelbrot Set in HTML5 Canvas &amp; JavaScript</title>
-    <!--
-     The Mandelbrot Set, in HTML5 canvas and javascript.
-     https://github.com/cslarsen/mandelbrot-js
+    <title>Buddhabrot Fractal in HTML5 Canvas &amp; JavaScript</title>
 
-     Copyright (C) 2012 Christian Stigen Larsen
-
-     Licensed under the Apache License, Version 2.0 (the "License"); you may
-     not use this file except in compliance with the License.  You may
-     obtain a copy of the License at
-
-         http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-     implied.  See the License for the specific language governing
-     permissions and limitations under the License.
-     -->
     <style type="text/css">
       body {
         background-color: black;
@@ -70,18 +53,12 @@
         color: #FF3B03;
         text-shadow: 0px 1px 0px rgb(40, 40, 40);
         width: 300px;
-
-        /* Make text non-selecatble */
         user-select: none;
-        -moz-user-select: none;
-        -khtml-user-select: none;
-        -webkit-user-select: none;
-        -o-user-select: none;
       }
 
       #infoBox:hover {
         background-color: rgba(30, 30, 30, 0.3);
-        color: #444;
+        color: #FFFFFF;
         border: #222 1px solid;
       }
 
@@ -94,11 +71,11 @@
         padding: 5px;
 
         background: transparent;
-        color: rgba(51,51,51,0.1);
+        color: rgba(87,87,87,0.6);
         text-shadow: none;
 
         font-family: sans-serif;
-        font-size:8pt;
+        font-size:10pt;
       }
 
       #description table {
@@ -122,14 +99,6 @@
         font-size: 10pt;
       }
 
-      #autoIterations {
-        border: #444 1px solid;
-        color: #ccc;
-        outline: none;
-        background-color: #333;
-        font-size: 10pt;
-      }
-
       .headerText {
         color: #666;
       }
@@ -146,18 +115,19 @@
       }
     </style>
   </head>
+
   <body onload="focusOnSubmit();">
     <div id="description">
       <header>
         <div style="text-align: center;">
           <hr />
-          <h1>The Mandelbrot Set</h1>
+          <h1>Buddhabrot Fractal</h1>
           <p class="headerText">In HTML5 Canvas and JavaScript</p>
           <hr />
         </div>
       </header>
 
-      <form id="settingsForm" action="javascript:draw(getColorPicker(), getSamples());">
+      <form id="settingsForm" action="javascript:draw();">
         <table>
         <tr>
           <td>Rendering time</td>
@@ -172,57 +142,50 @@
           </td>
         </tr>
         <tr>
-          <td>Iterations</td>
+          <td>Algorithm</td>
           <td>
-            <input class="textInput" size="4" type="text" id="steps" value="50" />
-            <input type="checkbox" id="autoIterations" checked="checked"/>
-            <small>auto</small></td>
-        </tr>
-        <tr>
-          <td>Escape radius</td>
-          <td> <input class="textInput" size="4" type="text"
-            id="escapeRadius" value="10.0" /> </td>
-        </tr>
-        <tr>
-          <td>Color scheme</td>
-          <td>
-            <select id="colorScheme">
-              <option value="pickGradientColorBands">Gradient Color Bands</option>
-              <option value="pickSharpColorBands">Sharp Color Bands</option>
+            <select id="algorithm">
+              <option value="0">Mandelbrot</option>
+              <option value="1">z^3</option>
+              <option value="2">sin variation re</option>
+              <option value="3">atan variation</option>
+              <option value="4">sin variation im</option>
+              <option value="5">Tricorn</option>
+              <option value="6">tan variation</option>
             </select>
           </td>
         </tr>
 
         <tr>
-        <td>Color</td>
-        <td><input id="colorSlider" type="range" min="0" max="100" value="93"/></td>
-        <tr>
-
-        <tr>
-        <td>Spectrum</td>
-        <td><input id="spectrumSlider" type="range" min="1" max="1000" value="10"/></td>
-        <tr>
-
-        <tr>
         <td>Contrast</td>
-        <td><input id="contrastSlider" type="range" min="1" max="100" value="45"/></td>
+        <td><input id="contrastSlider" type="range" min="1" max="100" value="70"/></td>
         <tr>
 
         <tr>
-        <td>Saturated Colors</td>
-        <td><input type="checkbox" id="smooth"/></td>
+        <td>Brightness</td>
+        <td><input id="brightnessSlider" type="range" min="1" max="500" value="140"/></td>
         <tr>
 
+        <tr>
+        <td><font color='red'>Depth Red</font></td>
+        <td><input id="redText" type="text" value="1500"/></td>
+        <tr>
 
         <tr>
-          <td>Supersamples</td>
-          <td><input class="textInput" size="4" type="text" id="superSamples" value="1" /></td>
-        </tr>
+        <td><font color='green'>Depth Green</font></td>
+        <td><input id="greenText" type="text" value="200"/></td>
         <tr>
-          <td>Scanline update (ms)</td>
-          <td><input class="textInput" size="4" type="text"
-                id="updateTimeout" value="200" /></td>
-        </tr>
+
+        <tr>
+        <td><font color='blue'>Depth Blue</font></td>
+        <td><input id="blueText" type="text" value="60"/></td>
+        <tr>
+
+        <tr>
+        <td>Inverse</td>
+        <td><input type="checkbox" id="inverse"/></td>
+        <tr>
+
         <tr>
           <td colspan="2">&nbsp;</td>
         </tr>
@@ -261,6 +224,7 @@
       <span id="infoText"></span>
     </div>
 
-    <script type="text/javascript" src="mandelbrot.js"></script>
+    <script type="text/javascript" src="buddhabrot.js"></script>
+
   </body>
 </html>

@@ -2,25 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>The Mandelbrot Set in HTML5 Canvas &amp; JavaScript</title>
-    <!--
-     The Mandelbrot Set, in HTML5 canvas and javascript.
-     https://github.com/cslarsen/mandelbrot-js
+    <title>Newton Fractal in HTML5 Canvas &amp; JavaScript</title>
 
-     Copyright (C) 2012 Christian Stigen Larsen
-
-     Licensed under the Apache License, Version 2.0 (the "License"); you may
-     not use this file except in compliance with the License.  You may
-     obtain a copy of the License at
-
-         http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-     implied.  See the License for the specific language governing
-     permissions and limitations under the License.
-     -->
     <style type="text/css">
       body {
         background-color: black;
@@ -122,14 +105,6 @@
         font-size: 10pt;
       }
 
-      #autoIterations {
-        border: #444 1px solid;
-        color: #ccc;
-        outline: none;
-        background-color: #333;
-        font-size: 10pt;
-      }
-
       .headerText {
         color: #666;
       }
@@ -146,18 +121,19 @@
       }
     </style>
   </head>
+
   <body onload="focusOnSubmit();">
     <div id="description">
       <header>
         <div style="text-align: center;">
           <hr />
-          <h1>The Mandelbrot Set</h1>
+          <h1>Newton Fractal</h1>
           <p class="headerText">In HTML5 Canvas and JavaScript</p>
           <hr />
         </div>
       </header>
 
-      <form id="settingsForm" action="javascript:draw(getColorPicker(), getSamples());">
+      <form id="settingsForm" action="javascript:draw(getSamples());">
         <table>
         <tr>
           <td>Rendering time</td>
@@ -173,22 +149,14 @@
         </tr>
         <tr>
           <td>Iterations</td>
-          <td>
-            <input class="textInput" size="4" type="text" id="steps" value="50" />
-            <input type="checkbox" id="autoIterations" checked="checked"/>
-            <small>auto</small></td>
+          <td><input class="textInput" size="4" type="text" id="txtSteps" value="50" /></td>
         </tr>
         <tr>
-          <td>Escape radius</td>
-          <td> <input class="textInput" size="4" type="text"
-            id="escapeRadius" value="10.0" /> </td>
-        </tr>
-        <tr>
-          <td>Color scheme</td>
+          <td>Equation</td>
           <td>
-            <select id="colorScheme">
-              <option value="pickGradientColorBands">Gradient Color Bands</option>
-              <option value="pickSharpColorBands">Sharp Color Bands</option>
+            <select id="mode">
+              <option value="mode0">z^n - 1 = 0</option>
+              <option value="mode1">z^n - 1 / z</option>
             </select>
           </td>
         </tr>
@@ -199,9 +167,14 @@
         <tr>
 
         <tr>
-        <td>Spectrum</td>
-        <td><input id="spectrumSlider" type="range" min="1" max="1000" value="10"/></td>
+        <td>Real Exponent</td>
+        <td><input id="real_exponent" type="range" min="3" max="12" value="3"/></td>
         <tr>
+
+        <tr>
+          <td>Complex Exponent</td>
+          <td><input class="textInput" size="4" type="text" id="complex_exponent" value="0" /></td>
+        </tr>
 
         <tr>
         <td>Contrast</td>
@@ -209,8 +182,8 @@
         <tr>
 
         <tr>
-        <td>Saturated Colors</td>
-        <td><input type="checkbox" id="smooth"/></td>
+        <td>Mandelbrot Variant</td>
+        <td><input type="checkbox" id="mandelbrot"/></td>
         <tr>
 
 
@@ -218,11 +191,7 @@
           <td>Supersamples</td>
           <td><input class="textInput" size="4" type="text" id="superSamples" value="1" /></td>
         </tr>
-        <tr>
-          <td>Scanline update (ms)</td>
-          <td><input class="textInput" size="4" type="text"
-                id="updateTimeout" value="200" /></td>
-        </tr>
+
         <tr>
           <td colspan="2">&nbsp;</td>
         </tr>
@@ -261,6 +230,9 @@
       <span id="infoText"></span>
     </div>
 
-    <script type="text/javascript" src="mandelbrot.js"></script>
+    <script type="text/javascript" src="complex.js"></script>
+    <script type="text/javascript" src="newton.js"></script>
+
+
   </body>
 </html>
