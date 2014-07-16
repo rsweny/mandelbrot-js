@@ -37,7 +37,7 @@ var renderId = 0; // To zoom before current render is finished
 var orbit_trap = 0.5;
 var orbitRealPoint = 0.5;
 var orbitImgPoint = -0.25;
-var doOrbit = true;
+var doOrbit = false;
 var orbitType = 3;
 var doOrbitAverage = false;
 

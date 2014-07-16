@@ -3,7 +3,7 @@ Mandelbrot.js
 
 Vanilla Mandelbrot Set renderer in HTML5 canvas and javascript.
 
-This code running in action can be seen at http://mandelbrot-set.com
+Live versions: http://cabin.stasis.org/mandelbrot.html | http://cabin.stasis.org/buddhabrot.html | http://cabin.stasis.org/newton.html
 
 Author
 ------
