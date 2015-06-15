@@ -1,0 +1,57 @@
+<html>
+<head>
+<title>Fractal</title>
+</head>
+
+<body bgcolor='#000'>
+
+
+<applet code="fractal/Mandelbrot3D.class" archive="Mandelbrot3D.jar" width="1800" height="1800">
+<param name="draggable" value="true">
+<param name="java_arguments" value="-Xmx500m">
+</applet>
+
+
+<Font color='white'>
+<ul>
+        <li>Right click to show/hide the options.</li>
+        <li>Drag on an area to zoom.</li>
+        <li>Shift click to change color pallet</li>
+        <li>Middle click to change formula (mandelbulb sin, cos)</li>
+		<li>Ctrl click to inverse azimuth</li>
+		<li>Press f in the focus box to show focus limits</li>
+</ul></font>
+
+
+<font size='1'><a href='http://cabin.users.geeky.net/Fractal.php'>Fractal Home</a></font>
+
+<!--
+
+keytool -genkey -keyalg rsa -alias yourkey
+
+Follow the instructions and type in all needed information.
+
+Now we make the certificate:
+
+keytool -export -alias yourkey -file yourcert.crt
+
+
+Now we have to sign the applet:
+
+Just make a *.bat file including this:
+
+javac yourapplet.java
+jar cvf yourapplet.jar yourapplet.class
+jarsigner yourapplet.jar yourkey
+
+
+The batch-file compiles the applet, makes a jar-archive and signs the jar-file.
+
+The HTML-code to display the applet:
+
+<applet code="yourapplet.class" archive="yourapplet.jar" width="600" height="500">
+</applet>
+-->
+</body>
+</html>
+
