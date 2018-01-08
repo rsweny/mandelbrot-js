@@ -449,7 +449,7 @@ function drawOrbit(iter, img_color, string_color)
 	return counter;
 }
 
-	/*
+/*
  * Render the Mandelbrot set
  */
 function draw()
