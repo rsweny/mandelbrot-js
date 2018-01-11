@@ -579,7 +579,7 @@ function render()
         }
 
         // yield control back to browser, so that canvas is updated
-        setTimeout(scanline, 30);
+        setTimeout(scanline, 10);
 
 	};
 

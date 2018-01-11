@@ -189,9 +189,9 @@ public void paint(Graphics g)
 function findPeak(arr)
 {
 	var max = 0;
-	for (var i = 1; i < canvas.width; i++)
+	for (var i = 1; i < ximlen; i++)
 	{
-		for (var j = 1; j < canvas.height; j++)
+		for (var j = 1; j < yimlen; j++)
 		{
 			if (arr[i][j] > max)
 			{
@@ -212,10 +212,10 @@ function clearScreenAndReset(fresh)
 	if (fresh)
 	{
 		occlusionPositions = matrix(ximlen,yimlen,0.0);
-		img_alpha =  matrix(ximlen,yimlen,0.0);
-		img_red = matrix(ximlen,yimlen,0.0);
-		img_green = matrix(ximlen,yimlen,0.0);
-		img_blue = matrix(ximlen,yimlen,0.0);
+		//img_alpha =  matrix(ximlen,yimlen,0.0);
+		//img_red = matrix(ximlen,yimlen,0.0);
+		//img_green = matrix(ximlen,yimlen,0.0);
+		//img_blue = matrix(ximlen,yimlen,0.0);
 	}
 
 	m_down = false;
@@ -238,7 +238,7 @@ function gridpoints(yRow)
 	var z2 = (yRow / yimlen - 0.5 + jitter1) * zoom - ycen;
 	var red, green, blue;
 
-	//console.log(root_zoom + " " + stepAmount + " lims " + ximlen + " " + yimlen);
+	//console.log(root_zoom + " step1: " + stepAmount);
 	
 	for (var x = 0; x < ximlen; x++)
 	{
@@ -276,8 +276,8 @@ function gridpoints(yRow)
 				//console.log("inside for " + fractal_x + " " + y + " " + fractal_z);
 				//plot pixel
 				var goodPoints = []; //java Vector
-				var rnd1 = Math.random();
-				var light_factor = 1.0 + calculateRays(point3D, rnd1, goodPoints);
+				var rndFuzzy = Math.max(opacity*Math.random(), 0.4);
+				var light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
 				plotPixel(x, yRow, y, color, light_factor);
 				visiblePixels++;
 				
@@ -297,7 +297,7 @@ function gridpoints(yRow)
 					color = point3D[4];
 					if (iter == depth)
 					{
-						light_factor = 1.0 + calculateRays(point3D, rnd1, goodPoints);
+						light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
 						plotPixel(x, yRow, y, color, light_factor);
 						visiblePixels++;
 						found++;
@@ -312,7 +312,7 @@ function gridpoints(yRow)
 					{
 						var traced_point = goodPoints[i]; //double[]
 						color = traced_point[4];
-						light_factor = 1.0 + calculateRays(traced_point, rnd1, null);
+						light_factor = 1.0 + calculateRays(traced_point, rndFuzzy, null);
 						var screen_point = reversePoint(traced_point);
 						
 						//if the ray point is not occluded, draw it
@@ -339,9 +339,9 @@ function gridpoints(yRow)
 				if (cameraPersp > 0) plot_start = 4;
 				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start)
 				{
-					blue = 250;
-					green = 90 + iter*2;
-					red = 20 + iter;
+					red = 250;
+					blue = 90 + iter*2;
+					green = 20 + iter;
 					
 					for (var c = 0; c < iter; c++)
 					{
@@ -351,6 +351,7 @@ function gridpoints(yRow)
 			}
 		}
 	}
+	//console.log(root_zoom + " step2: " + stepAmount);
 }
 	
 function plotPixel(x, yRow, depth, color, light_factor)
@@ -459,13 +460,10 @@ function insideFractal(data, trace_history)
 }
 	
 
-function calculateRays(origPoint, rnd, goodPoints)
+function calculateRays(origPoint, rndFuzzy, goodPoints)
 {
 	var light_factor = 1.0;
 
-	if (rnd > 0.9) rnd *= 2.0;
-	var rndFuzzy = Math.max(opacity*rnd, 0.4);
-	
 	var n0 = ray_step / (15.0*Math.random() + 1);
 	var n1 = ray_step / (15.0*Math.random() + 1);
 	var n2 = ray_step / (15.0*Math.random() + 1);
@@ -664,8 +662,6 @@ function setCamera()
 	IrotZ = RotateZ(-cameraYaw);
 	
 	factorDOF = cameraDOF * (ximlen/3);
-
-	console.log(CameraMatrix[0][0] + " ----------------------------- " + CameraMatrix[0][1] + " " + CameraMatrix[0][2] + " " + CameraMatrix[1][0] + " " + CameraMatrix[1][1] + " " + CameraMatrix[1][2]);
 }
 	
 function RotateX(angle)
@@ -816,91 +812,7 @@ function setZoom(z)
 }
 	
 /*
-public boolean mouseDown(Event evt, int x, int y)
-{
-	xanchor = x;
-	yanchor = y;
 
-	if (evt.modifiers == Event.ALT_MASK)
-	{
-		formula  = (formula + 1)%2;
-		if (formula == 0) System.out.println("sin mandelbulb");
-		else if (formula == 1) System.out.println("cos mandelbulb");
-		else System.out.println("symetric mandelbulb");
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.SHIFT_MASK)
-	{
-		pal  = (pal + 1)%(Pallet.fpalette.length);
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.CTRL_MASK)
-	{
-		inverse_azimuth = -inverse_azimuth;
-		System.out.println("inverse azimuth is " + inverse_azimuth);
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.META_MASK)
-	{
-		panelMain.setVisible(!panelMain.isVisible());
-	}
-
-	return true;
-}
-
-	public boolean mouseDrag(Event evt, int x, int y)
-	{
-		m_down = true;
-		xcurr = x;
-		ycurr = y;
-		repaint();
-		
-		int dx = Math.abs(xcurr - xanchor);
-		int dy = Math.abs(ycurr - yanchor);
-		double newxcen = xanchor + dx/2.0;
-		double fx = ((newxcen - (double)half_ximlen)/(double)ximlen)*zoom;
-		
-		double newycen = yanchor + dy/2.0;
-		double fy = ((newycen - (double)half_yimlen)/(double)yimlen)*zoom;
-		
-		String strStatus = newxcen + " " + newycen + "( " + fx + ","+fy+")";
-		showStatus(strStatus);
-		
-		return true;
-	}
-
-	public boolean mouseUp(Event evt, int x, int y)
-	{
-		xcurr = x;
-		ycurr = y;
-		m_down = false;
-
-		int dx = Math.abs(xcurr - xanchor);
-		int dy = Math.abs(ycurr - yanchor);
-		if (dy > dx)  dx = dy;
-		
-        //make sure zoom isn't too small
-       	if (dx > 10)
-       	{
-			double newxcen = xanchor + dx/2.0;
-			newxcen = ((newxcen - half_ximlen)/(double)ximlen)*zoom;
-			xcen = xcen - newxcen;
-
-			double newycen = yanchor + dx/2.0;
-			newycen = ((newycen - half_yimlen)/(double)yimlen)*zoom;
-			ycen = ycen - newycen;
-			
-			System.out.println("Xcen is " + xcen + " Ycen is " + ycen);
-			setZoom( ((double)dx/(double)(ximlen))*zoom);
-			reset = 1;
-		}
-
-		setConstants();
-		getConstants();
-		return true;
-	}
-
-	
 	public void keyReleased(KeyEvent e)
 	{
 		char c = e.getKeyChar();
@@ -1111,8 +1023,9 @@ public boolean mouseDown(Event evt, int x, int y)
 /*
  * Render the Mandelbrot set
  */
-function draw()
+function draw(startScanning)
 {
+	console.log("--------------------------draw()");
 	renderPass = 0;
 
 	if ( lookAt === null ) lookAt = lookAtDefault;
@@ -1139,12 +1052,15 @@ function draw()
 	}
 
 	adjustAspectRatio(xRange, yRange, canvas);
-	//console.log("screenZoom: " + screenZoom[0] + " " + screenZoom[1]  + " mode: " + mode);
+	console.log("canvas: " + canvas.width + "x" + canvas.height);
 
-	img_alpha = matrix(canvas.width, canvas.height, 0.0);
-	img_red = matrix(canvas.width, canvas.height, 0.0);
-	img_green = matrix(canvas.width, canvas.height, 0.0);
-	img_blue = matrix(canvas.width, canvas.height, 0.0);
+	//if (img_alpha == null)
+	{
+		img_alpha = matrix(canvas.width, canvas.height, 0.0);
+		img_red = matrix(canvas.width, canvas.height, 0.0);
+		img_green = matrix(canvas.width, canvas.height, 0.0);
+		img_blue = matrix(canvas.width, canvas.height, 0.0);
+	}
 
 	updateHashTag();
 	updateInfoBox();
@@ -1152,102 +1068,31 @@ function draw()
 	// Only enable one render at a time
 	renderId += 1;
 
-	render();
+	render(startScanning);
 }
 
 
-function render2()
+
+function render(startScanning)
 {
 	var start  = (new Date).getTime();
-	var startHeight = canvas.height;
-	var startWidth = canvas.width;
 	var lastUpdate = start;
 	var pixels = 0;
-	var Ci = yRange[0];
-	var sy = 0;
-	var ourRenderId = renderId;
 
-	var dx = (xRange[1] - xRange[0]) / canvas.width;
-	var dy = (yRange[1] - yRange[0]) / canvas.height;
-
-	var scanline = function()
-	{
-		if (renderId != ourRenderId || startHeight != canvas.height || startWidth != canvas.width)
-		{
-			// Stop drawing
-			console.log("window changed, stopping.")
-			return;
-		}
-
-
-
-		 // Javascript is inherently single-threaded, and the way
-		 // you yield thread control back to the browser is MYSTERIOUS.
-
-		 // People seem to use setTimeout() to yield, which lets us
-		 // make sure the canvas is updated, so that we can do animations.
-
-		 // But if we do that for every scanline, it will take 100x longer
-		 // to render everything, because of overhead.  So therefore, we'll
-		 // do something in between.
-
-
-		var now = (new Date).getTime();
-		gridpoints(Ci);
-		Ci += dy;
-		if (Ci >= canvas.height) Ci = 0;
-		pixels += canvas.width;
-		
-		if ( (now - lastUpdate) >= 10000  || renderPass == 5) {
-			// show the user where we're rendering
-			updateHistogram();
-			updateInfoBox();
-
-			// Update speed and time taken
-			var elapsedMS = now - start;
-			$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1); // 1 comma
-
-			var speed = Math.floor(pixels / elapsedMS);
-
-			if ( metric_units(speed).substr(0,3)=="NaN" ) {
-				speed = Math.floor(60.0*pixels / elapsedMS);
-				$('renderSpeedUnit').innerHTML = 'minute';
-			} else
-				$('renderSpeedUnit').innerHTML = 'second';
-
-			$('renderSpeed').innerHTML = metric_units(speed);
-
-			lastUpdate = now;
-        }
-
-
-
-	};
-
-	scanline();
-}
-
-
-	
-function render()
-{
-	// for(var y = 0; y < yimlen; y++)
 	var y = 0;
-
 	var scanline = function()
 	{
 		if (reset == 1)
 		{
+			console.log("reset render at first line");
 			reset = 0;
 			y = 0;
 			clearScreenAndReset(true);
-			return;
 		}
 		else if (reset == 2)
 		{
 			reset = 0;
 			updateHistogram();
-			//repaint();
 		}
 		
 		//while (m_down)
@@ -1262,10 +1107,11 @@ function render()
 		
 		gridpoints(y);
 		if (currentPass % ximlen == 0) updateMinMaxY();
+		pixels += ximlen;
 		
 		//Thread.sleep(10);
 		
-		if (currentPass < 20 || currentPass % 50 == 0)
+		if (currentPass % 50 == 0)
 		{
 			var t2 = (new Date()).getTime();
 			var completeness = Math.round(max_alpha*100)/100.0;
@@ -1289,13 +1135,29 @@ function render()
 			rayPoints = 0;
 		}
 
+
+		var now = (new Date).getTime();
+		if ( (now - lastUpdate) >= 10000) {
+
+			// Update speed and time taken
+			var elapsed = (now - start)/1000.0;
+			var speed = Math.floor(pixels / elapsed);
+
+			$('renderTime').innerHTML = elapsed.toFixed(1);
+			$('renderSpeed').innerHTML = speed;
+
+			lastUpdate = now;
+        }
+
 		// yield control back to browser, so that canvas is updated
+		var sleepTime = 30;
+		if (m_down) sleepTime = 2000;
 		y++;
 		if (y > yimlen-1) y = 0;
-        setTimeout(scanline, 100);
+        setTimeout(scanline, sleepTime);
 	}
 
-	scanline();
+	if (startScanning) scanline();
 }
 
 
@@ -1310,7 +1172,7 @@ function updateHistogram()
 	
 	for (var y=0; y<canvas.height; y++)
 	{
-		for (var  x=0; x<canvas.width; x++)
+		for (var x=0; x<canvas.width; x++)
 		{
 			var z = Math.pow(img_alpha[x][y], gradient)*brightness/max_alpha;
 			red = ( (img_red[x][y]*z)/img_alpha[x][y] );
@@ -1357,7 +1219,7 @@ window.onresize = function(event)
 function init()
 {
 	yimlen = canvas.height;
-	ximlen = canvas.width;
+	ximlen = canvas.height;
 
 	half_ximlen = ximlen / 2;
 	half_yimlen = yimlen / 2;
@@ -1373,12 +1235,206 @@ function init()
 	getConstants();
 }
 
+/*
+public boolean mouseDown(Event evt, int x, int y)
+{
+	xanchor = x;
+	yanchor = y;
+
+	if (evt.modifiers == Event.ALT_MASK)
+	{
+		formula  = (formula + 1)%2;
+		if (formula == 0) System.out.println("sin mandelbulb");
+		else if (formula == 1) System.out.println("cos mandelbulb");
+		else System.out.println("symetric mandelbulb");
+		reset = 1;
+	}
+	else if (evt.modifiers == Event.SHIFT_MASK)
+	{
+		pal  = (pal + 1)%(Pallet.fpalette.length);
+		reset = 1;
+	}
+	else if (evt.modifiers == Event.CTRL_MASK)
+	{
+		inverse_azimuth = -inverse_azimuth;
+		System.out.println("inverse azimuth is " + inverse_azimuth);
+		reset = 1;
+	}
+	else if (evt.modifiers == Event.META_MASK)
+	{
+		panelMain.setVisible(!panelMain.isVisible());
+	}
+
+	return true;
+}
+
+public boolean mouseDrag(Event evt, int x, int y)
+{
+	m_down = true;
+	xcurr = x;
+	ycurr = y;
+	repaint();
+	
+	int dx = Math.abs(xcurr - xanchor);
+	int dy = Math.abs(ycurr - yanchor);
+	double newxcen = xanchor + dx/2.0;
+	double fx = ((newxcen - (double)half_ximlen)/(double)ximlen)*zoom;
+	
+	double newycen = yanchor + dy/2.0;
+	double fy = ((newycen - (double)half_yimlen)/(double)yimlen)*zoom;
+	
+	String strStatus = newxcen + " " + newycen + "( " + fx + ","+fy+")";
+	showStatus(strStatus);
+	
+	return true;
+}
+
+public boolean mouseUp(Event evt, int x, int y)
+{
+	xcurr = x;
+	ycurr = y;
+	m_down = false;
+
+	int dx = Math.abs(xcurr - xanchor);
+	int dy = Math.abs(ycurr - yanchor);
+	if (dy > dx)  dx = dy;
+	
+    //make sure zoom isn't too small
+   	if (dx > 10)
+   	{
+		double newxcen = xanchor + dx/2.0;
+		newxcen = ((newxcen - half_ximlen)/(double)ximlen)*zoom;
+		xcen = xcen - newxcen;
+
+		double newycen = yanchor + dx/2.0;
+		newycen = ((newycen - half_yimlen)/(double)yimlen)*zoom;
+		ycen = ycen - newycen;
+		
+		System.out.println("Xcen is " + xcen + " Ycen is " + ycen);
+		setZoom( ((double)dx/(double)(ximlen))*zoom);
+		reset = 1;
+	}
+
+	setConstants();
+	getConstants();
+	return true;
+}
+*/
+
+
+
+
+
+
+
+
+
+
+
+
 function main()
 {
+	var box = null;
+
 	$('viewPNG').onclick = function(event)
 	{
 		window.open(canvas.toDataURL('image/png'));
 	};
+
+	$("contrastSlider").onchange = function() {
+		gradient =  $("contrastSlider").value / 100.0; 
+		updateHistogram();
+		updateHashTag();
+		console.log("gradient: " + gradient);
+	}
+
+	$("brightnessSlider").onchange = function() {
+		brightness =  $("brightnessSlider").value / 100.0; 
+		updateHistogram();
+		updateHashTag();
+		console.log("brightness: " + brightness);
+	}
+
+	$('canvasControls').onmousedown = function(e)
+	{
+		console.log("mouse down!");
+
+		var mousex = e.pageX - this.offsetLeft;
+		var mousey = e.pageY - this.offsetTop;
+		if ( box == null )
+			box = [mousex, mousey, 0, 0];
+
+		console.log(e.pageX + " " + this.offsetLeft + " - " + e.pageY + " " + this.offsetTop);
+	}
+
+	$('canvasControls').onmousemove = function(e)
+	{
+		if ( box != null ) {
+			m_down = true;
+			var c = ccanvas.getContext('2d');
+			c.lineWidth = 1;
+
+			// clear out old box first
+			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
+
+			// draw new box
+			c.strokeStyle = '#FF3B03';
+			box[2] = e.pageX - this.offsetLeft;
+			box[3] = e.pageY - this.offsetTop;
+			var dx = Math.abs(box[2]-box[0]);
+			var dy = Math.abs(box[3]-box[1]);
+			c.strokeRect(box[0], box[1], dx, dy);
+
+			//print stuff
+			var newxcen = box[0] + dx/2.0;
+			var fx = ((newxcen - half_ximlen)/ximlen)*zoom;
+	
+			var newycen = box[1] + dy/2.0;
+			var fy = ((newycen - half_yimlen)/yimlen)*zoom;
+		}
+	}
+
+	$('canvasControls').onmouseup = function(e)
+	{
+		console.log("mouse up!");
+		if ( box != null ) {
+
+			/*
+			 * Cleaer entire canvas
+			 */
+			var c = ccanvas.getContext('2d');
+			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
+
+
+			/*
+			 * Do the zoom and restart render
+			 */
+			m_down = false;
+			var dx = Math.abs(box[2]-box[0]);
+			var dy = Math.abs(box[3]-box[1]);
+			if (dy > dx)  dx = dy;
+			
+		    //make sure zoom isn't too small
+		   	if (dx > 10)
+		   	{
+				var newxcen = box[0] + dx/2.0;
+				newxcen = ((newxcen - half_ximlen)/ximlen)*zoom;
+				xcen = xcen - newxcen;
+
+				var newycen = box[1] + dx/2.0;
+				newycen = ((newycen - half_yimlen)/yimlen)*zoom;
+				ycen = ycen - newycen;
+				
+				console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
+				setZoom( (dx/ximlen)*zoom );
+				reset = 1;
+				setConstants();
+				getConstants();
+				draw(false);
+			}
+			box = null;
+		}
+	}
 
 
 	/*
@@ -1387,7 +1443,7 @@ function main()
 	readHashTag();
 	setZoom(zoom);
 	init();
-	draw();
+	draw(true);
 }
 
 main();
