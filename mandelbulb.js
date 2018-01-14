@@ -18,6 +18,75 @@
  *
  */
 
+ // geyser27.ppm 
+var pallet =
+[
+ [100, 0, 0], [26, 5, 5], [77, 17, 6], [98, 45, 29],
+ [124, 78, 66], [114, 129, 146], [115, 168, 193], [132, 179, 210],
+ [152, 186, 220], [153, 176, 202], [142, 171, 181], [157, 169, 176],
+ [165, 162, 158], [154, 131, 103], [149, 104, 73], [152, 98, 60],
+ [140, 85, 46], [138, 67, 23], [163, 57, 6], [173, 55, 8],
+ [179, 56, 3], [190, 61, 8], [208, 86, 7], [210, 110, 25],
+ [221, 127, 29], [222, 150, 44], [226, 161, 53], [222, 159, 52],
+ [222, 152, 60], [213, 148, 66], [193, 134, 70], [164, 146, 113],
+ [138, 141, 159], [133, 144, 165], [154, 139, 122], [148, 108, 84],
+ [158, 115, 69], [189, 121, 57], [198, 124, 48], [212, 136, 45],
+ [224, 146, 39], [223, 143, 35], [222, 137, 31], [222, 136, 24],
+ [221, 137, 18], [205, 101, 19], [198, 76, 4], [176, 60, 14],
+ [148, 86, 43], [154, 110, 61], [141, 115, 89], [125, 168, 156],
+ [126, 173, 199], [109, 156, 212], [105, 144, 195], [96, 120, 161],
+ [71, 74, 121], [37, 58, 125], [26, 49, 119], [16, 42, 117],
+ [17, 41, 115], [18, 38, 106], [35, 42, 95], [53, 36, 45],
+ [59, 35, 35], [84, 25, 14], [98, 35, 15], [116, 48, 18],
+ [121, 56, 23], [135, 72, 28], [142, 82, 36], [163, 103, 51],
+ [178, 108, 56], [196, 123, 61], [214, 145, 68], [202, 165, 99],
+ [182, 166, 149], [177, 174, 165], [175, 176, 165], [157, 168, 171],
+ [135, 153, 167], [120, 125, 129], [126, 87, 69], [125, 82, 64],
+ [126, 81, 63], [127, 75, 46], [137, 83, 37], [142, 82, 36],
+ [142, 80, 35], [134, 70, 20], [116, 51, 9], [107, 38, 11],
+ [97, 29, 7], [86, 25, 13], [87, 26, 8], [93, 28, 8],
+ [103, 31, 6], [110, 40, 6], [111, 43, 7], [141, 28, 8],
+ [143, 31, 7], [145, 34, 10], [148, 36, 6], [145, 39, 3],
+ [128, 54, 22], [115, 51, 25], [99, 50, 25], [99, 47, 28],
+ [102, 44, 27], [95, 42, 26], [53, 35, 43], [23, 38, 100],
+ [14, 34, 103], [18, 28, 89], [18, 28, 89], [18, 28, 89],
+ [34, 13, 12], [75, 15, 6], [85, 15, 2], [98, 23, 4],
+ [101, 24, 2], [105, 32, 2], [106, 34, 2], [104, 37, 12],
+ [100, 33, 14], [91, 30, 11], [88, 29, 11], [93, 38, 18],
+ [96, 39, 24], [98, 47, 30], [69, 63, 76], [36, 54, 121],
+ [49, 63, 118], [100, 68, 69], [114, 71, 55], [131, 86, 57],
+ [159, 109, 61], [186, 112, 45], [200, 123, 46], [217, 143, 50],
+ [221, 149, 55], [221, 147, 50], [211, 139, 54], [188, 119, 49],
+ [175, 103, 38], [152, 85, 32], [165, 61, 23], [160, 43, 7],
+ [163, 41, 6], [153, 31, 3], [156, 35, 7], [162, 41, 7],
+ [164, 43, 5], [170, 53, 9], [182, 67, 12], [195, 110, 40],
+ [213, 134, 48], [224, 152, 58], [223, 161, 67], [222, 154, 64],
+ [195, 134, 61], [181, 119, 60], [156, 111, 61], [145, 104, 74],
+ [126, 81, 65], [91, 91, 112], [114, 123, 157], [118, 163, 183],
+ [127, 182, 196], [128, 186, 211], [132, 187, 192], [154, 193, 164],
+ [167, 204, 164], [170, 202, 163], [180, 203, 188], [163, 198, 225],
+ [139, 193, 222], [136, 192, 219], [119, 177, 225], [115, 173, 225],
+ [112, 166, 225], [109, 154, 202], [113, 118, 144], [119, 77, 72],
+ [112, 67, 52], [102, 53, 32], [102, 53, 33], [111, 67, 54],
+ [90, 85, 91], [44, 63, 127], [32, 52, 121], [26, 46, 119],
+ [18, 38, 109], [16, 31, 95], [16, 31, 95], [16, 31, 95],
+ [16, 31, 95], [23, 21, 51], [33, 11, 21], [46, 37, 52],
+ [55, 66, 120], [98, 107, 144], [133, 149, 176], [137, 158, 190],
+ [121, 132, 164], [76, 86, 128], [40, 58, 125], [30, 50, 118],
+ [27, 47, 121], [39, 50, 109], [107, 61, 46], [104, 57, 36],
+ [110, 60, 40], [130, 82, 55], [153, 108, 60], [155, 114, 66],
+ [186, 132, 68], [216, 177, 98], [221, 182, 114], [220, 213, 126],
+ [223, 205, 147], [194, 197, 178], [174, 198, 177], [183, 184, 159],
+ [192, 145, 102], [178, 111, 64], [170, 81, 28], [173, 58, 7],
+ [173, 52, 7], [173, 50, 5], [167, 48, 2], [160, 47, 3],
+ [158, 48, 2], [163, 51, 6], [174, 58, 8], [189, 97, 22],
+ [209, 124, 41], [219, 144, 52], [219, 148, 62], [200, 138, 62],
+ [187, 134, 72], [171, 156, 133], [167, 172, 160], [138, 150, 173],
+ [126, 139, 157], [142, 106, 81], [117, 71, 55], [108, 50, 28],
+ [98, 42, 18], [89, 28, 10], [81, 23, 6], [78, 14, 2],
+ [78, 14, 1], [88, 14, 1], [98, 14, 1], [108, 14, 1],
+];
+
  var mode = 0;
 
 
@@ -36,7 +105,7 @@ var shadow_darkness = 30.0;
 var HORIZON = 20;
 
 //fog based on path traces
-var fog_factor = 0.04;
+var fog_factor = 0.94;
 var min_y, max_y;
 
 //formula variation
@@ -93,20 +162,6 @@ var visiblePixels, allPixels, rayPoints;
 var renderpass = 0;
 var max_alpha = 1;
 
-//Screen
-var zoomStart = 2.4;
-var screenZoom = [zoomStart, zoomStart];
-var lookAtDefault = [0.0, 0.0];
-var lookAt = lookAtDefault;
-var xRange = [0, 0];
-var yRange = [0, 0];
-var range_x;
-var range_y;
-
-var reInitCanvas = true; // Whether to reload canvas size, etc
-var dragToZoom = true;
-
-var renderId = 0; // To zoom before current render is finished
 
 /*
  * Initialize canvas
@@ -130,11 +185,6 @@ function $(id)
 	return document.getElementById(id);
 }
 
-function focusOnSubmit()
-{
-	var e = $('submitButton');
-	if ( e ) e.focus();
-}
 
 function matrix(rows, cols, defaultValue)
 {
@@ -170,22 +220,11 @@ function updateMinMaxY()
 			}
 		}
 	}
-	focus_depth = (max_y - min_y) * 0.25; //0.3
+	focus_depth = (max_y - min_y) * 0.33;
 	console.log(focus_depth + " Y Bounds: " + min_y + " to " + max_y);
 }
 	
-/*
-public void paint(Graphics g)
-{
-	g.drawImage(img, 0, 0, this);
-	if (m_down) 
-    {
-		g.setColor(Color.white);
-		g.drawRect(xanchor,yanchor,xcurr-xanchor,ycurr-yanchor);
-    }
-}
-*/
-	
+
 function findPeak(arr)
 {
 	var max = 0;
@@ -202,21 +241,18 @@ function findPeak(arr)
 	return max;
 }
 
-function clearScreenAndReset(fresh)
+function clearScreenAndReset()
 {
 	renderpass = 0;
 	max_alpha = 1;
 	min_y = -2.0;
 	max_y = 2.0;
 	
-	if (fresh)
-	{
-		occlusionPositions = matrix(ximlen,yimlen,0.0);
-		//img_alpha =  matrix(ximlen,yimlen,0.0);
-		//img_red = matrix(ximlen,yimlen,0.0);
-		//img_green = matrix(ximlen,yimlen,0.0);
-		//img_blue = matrix(ximlen,yimlen,0.0);
-	}
+	occlusionPositions = matrix(canvas.width,canvas.height,0.0);
+	img_alpha = matrix(canvas.width, canvas.height, 0.0);
+	img_red = matrix(canvas.width, canvas.height, 0.0);
+	img_green = matrix(canvas.width, canvas.height, 0.0);
+	img_blue = matrix(canvas.width, canvas.height, 0.0);
 
 	m_down = false;
 }
@@ -603,52 +639,7 @@ function reversePoint(fracPoint)
 }
 	
 
-function getConstants()
-{
-		/*
-		power = Double.parseDouble(txtPower.getText());
-		depth = Integer.parseInt(txtDepth.getText());
-		brightness = Double.parseDouble(txtBrightness.getText());
-		gradient = Double.parseDouble(txtGradient.getText());
-		setZoom( Double.parseDouble(txtZoom.getText()) );
 
-		cameraPersp = Double.parseDouble(txtPerspective.getText());
-		stepDetail = Double.parseDouble(txtZPos.getText());
-		cameraPitch = Double.parseDouble(txtPitch.getText());
-		cameraYaw = Double.parseDouble(txtYaw.getText());
-		cameraDOF = Double.parseDouble(txtDOF.getText());
-		opacity = Double.parseDouble(txtOpacity.getText());
-		focus = Double.parseDouble(txtFocus.getText());
-		frost = Double.parseDouble(txtZRes.getText());
-		fog_factor = Double.parseDouble(txtFog.getText());
-		primary_light = Double.parseDouble(txtLight.getText());
-		*/
-		
-		setCamera();
-
-}
-	
-function setConstants()
-{
-		/*
-		txtPower.setText(""+ power);
-		txtDepth.setText(""+ depth);
-		txtBrightness.setText(""+ brightness);
-		txtGradient.setText(""+ gradient);
-		txtZoom.setText(""+ zoom);
-		
-		txtPerspective.setText("" + cameraPersp);
-		txtZPos.setText("" + stepDetail);
-		txtPitch.setText("" + cameraPitch);
-		txtYaw.setText("" + cameraYaw);
-		txtDOF.setText("" + cameraDOF);
-		txtOpacity.setText("" + opacity);
-		txtFocus.setText("" + focus);
-		txtZRes.setText("" + frost);
-		txtFog.setText("" + fog_factor);
-		txtLight.setText("" + primary_light);
-		*/
-}
 	
 function setCamera()
 {
@@ -660,8 +651,6 @@ function setCamera()
 
 	IrotX = RotateX(-cameraPitch);
 	IrotZ = RotateZ(-cameraYaw);
-	
-	factorDOF = cameraDOF * (ximlen/3);
 }
 	
 function RotateX(angle)
@@ -1019,6 +1008,12 @@ function setZoom(z)
 	*/
 	
 	
+function reDraw()
+{
+	readHashTag();
+	updateHashTag();
+	draw(false);
+}
 
 /*
  * Render the Mandelbrot set
@@ -1026,47 +1021,8 @@ function setZoom(z)
 function draw(startScanning)
 {
 	console.log("--------------------------draw()");
-	renderPass = 0;
-
-	if ( lookAt === null ) lookAt = lookAtDefault;
-	if ( screenZoom === null ) screenZoom = [zoomStart, zoomStart];
-
-	xRange = [lookAt[0]-screenZoom[0]/2, lookAt[0]+screenZoom[0]/2];
-	yRange = [lookAt[1]-screenZoom[1]/2, lookAt[1]+screenZoom[1]/2];
-	range_x = xRange[1] - xRange[0];
-	range_y = yRange[1] - yRange[0];
-
-	if ( reInitCanvas ) {
-		reInitCanvas = false;
-
-		canvas = $('canvasMandelbrot');
-		canvas.width  = window.innerWidth;
-		canvas.height = window.innerHeight;
-
-		ccanvas = $('canvasControls');
-		ccanvas.width  = window.innerWidth;
-		ccanvas.height = window.innerHeight;
-
-		ctx = canvas.getContext('2d');
-		ctx_img = ctx.createImageData(canvas.width, canvas.height);
-	}
-
-	adjustAspectRatio(xRange, yRange, canvas);
-	console.log("canvas: " + canvas.width + "x" + canvas.height);
-
-	//if (img_alpha == null)
-	{
-		img_alpha = matrix(canvas.width, canvas.height, 0.0);
-		img_red = matrix(canvas.width, canvas.height, 0.0);
-		img_green = matrix(canvas.width, canvas.height, 0.0);
-		img_blue = matrix(canvas.width, canvas.height, 0.0);
-	}
 
 	updateHashTag();
-	updateInfoBox();
-
-	// Only enable one render at a time
-	renderId += 1;
 
 	render(startScanning);
 }
@@ -1087,7 +1043,7 @@ function render(startScanning)
 			console.log("reset render at first line");
 			reset = 0;
 			y = 0;
-			clearScreenAndReset(true);
+			clearScreenAndReset();
 		}
 		else if (reset == 2)
 		{
@@ -1095,33 +1051,21 @@ function render(startScanning)
 			updateHistogram();
 		}
 		
-		//while (m_down)
-		//{
-		//	try { Thread.sleep(1000); } catch(Exception e) {}
-		//}
-
 		renderpass++;
 		
-		//local variable to keep consistent across threads
-		var currentPass = renderpass;
-		
 		gridpoints(y);
-		if (currentPass % ximlen == 0) updateMinMaxY();
+		if (renderpass % ximlen == 0) updateMinMaxY();
 		pixels += ximlen;
 		
-		//Thread.sleep(10);
-		
-		if (currentPass % 50 == 0)
+		if (renderpass % 50 == 0)
 		{
 			var t2 = (new Date()).getTime();
 			var completeness = Math.round(max_alpha*100)/100.0;
-			var strStatus = y + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + currentPass + " max value: " + completeness + " in " + (t2-t1);
+			var strStatus = y + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + renderpass + " max value: " + completeness + " in " + (t2-t1);
 			t1 = (new Date()).getTime();
 			console.log(strStatus);
 			//showStatus(strStatus);
 			updateHistogram();
-
-			//repaint();
 
 			//autosave png and last 5 states.
 			//if (lastDir != null && lastDir.length() > 0 && (currentPass % 5000 == 0) )
@@ -1143,14 +1087,14 @@ function render(startScanning)
 			var elapsed = (now - start)/1000.0;
 			var speed = Math.floor(pixels / elapsed);
 
-			$('renderTime').innerHTML = elapsed.toFixed(1);
-			$('renderSpeed').innerHTML = speed;
+			$('renderTime').innerHTML = elapsed.toFixed(1) + " pass: " + renderpass;
+			$('renderSpeed').innerHTML = speed + " px/sec";
 
 			lastUpdate = now;
         }
 
 		// yield control back to browser, so that canvas is updated
-		var sleepTime = 30;
+		var sleepTime = 50;
 		if (m_down) sleepTime = 2000;
 		y++;
 		if (y > yimlen-1) y = 0;
@@ -1179,6 +1123,7 @@ function updateHistogram()
 			green = ( (img_green[x][y]*z)/img_alpha[x][y] );
 			blue = ( (img_blue[x][y]*z)/img_alpha[x][y] );
 
+			//tool to view focus bouds
 			if (drawFocus && occlusionPositions[x][y] > focus) {
 				green = 20;
 				red = 20;
@@ -1201,6 +1146,7 @@ function updateHistogram()
 		}
 	}
 	ctx.putImageData(ctx_img, 0, 0);
+	drawFocus = false;
 }
 
 
@@ -1230,9 +1176,8 @@ function init()
 	rotX = matrix(3, 3, 0.0);
 	rotZ = matrix(3, 3, 0.0);
 
-	clearScreenAndReset(true);
-	setConstants();
-	getConstants();
+	clearScreenAndReset();
+	setCamera();
 }
 
 /*
@@ -1266,70 +1211,7 @@ public boolean mouseDown(Event evt, int x, int y)
 	}
 
 	return true;
-}
-
-public boolean mouseDrag(Event evt, int x, int y)
-{
-	m_down = true;
-	xcurr = x;
-	ycurr = y;
-	repaint();
-	
-	int dx = Math.abs(xcurr - xanchor);
-	int dy = Math.abs(ycurr - yanchor);
-	double newxcen = xanchor + dx/2.0;
-	double fx = ((newxcen - (double)half_ximlen)/(double)ximlen)*zoom;
-	
-	double newycen = yanchor + dy/2.0;
-	double fy = ((newycen - (double)half_yimlen)/(double)yimlen)*zoom;
-	
-	String strStatus = newxcen + " " + newycen + "( " + fx + ","+fy+")";
-	showStatus(strStatus);
-	
-	return true;
-}
-
-public boolean mouseUp(Event evt, int x, int y)
-{
-	xcurr = x;
-	ycurr = y;
-	m_down = false;
-
-	int dx = Math.abs(xcurr - xanchor);
-	int dy = Math.abs(ycurr - yanchor);
-	if (dy > dx)  dx = dy;
-	
-    //make sure zoom isn't too small
-   	if (dx > 10)
-   	{
-		double newxcen = xanchor + dx/2.0;
-		newxcen = ((newxcen - half_ximlen)/(double)ximlen)*zoom;
-		xcen = xcen - newxcen;
-
-		double newycen = yanchor + dx/2.0;
-		newycen = ((newycen - half_yimlen)/(double)yimlen)*zoom;
-		ycen = ycen - newycen;
-		
-		System.out.println("Xcen is " + xcen + " Ycen is " + ycen);
-		setZoom( ((double)dx/(double)(ximlen))*zoom);
-		reset = 1;
-	}
-
-	setConstants();
-	getConstants();
-	return true;
-}
-*/
-
-
-
-
-
-
-
-
-
-
+}*/
 
 
 function main()
@@ -1338,7 +1220,15 @@ function main()
 
 	$('viewPNG').onclick = function(event)
 	{
-		window.open(canvas.toDataURL('image/png'));
+		// Chrome broke this circa 2018
+		//window.open(canvas.toDataURL('image/png'));
+
+		var string = canvas.toDataURL('image/png');
+		var iframe = "<iframe width='100%' height='100%' src='" + string + "'></iframe>"
+		var x = window.open();
+		x.document.open();
+		x.document.write(iframe);
+		x.document.close();
 	};
 
 	$("contrastSlider").onchange = function() {
@@ -1353,6 +1243,35 @@ function main()
 		updateHistogram();
 		updateHashTag();
 		console.log("brightness: " + brightness);
+	}
+
+	$("primary_light").onchange = function() {
+		primary_light = parseFloat($("primary_light").value);
+		updateHashTag();
+	}
+
+	$("fog").onchange = function() {
+		fog_factor = parseFloat($("fog").value);
+		updateHashTag();
+	}
+
+	$("power").onchange = function() {
+		power = parseFloat($("power").value);
+		updateHashTag();
+		reset = 1;
+	}
+
+	$("DOF").onchange = function() {
+		cameraDOF = parseFloat($("DOF").value);
+		factorDOF = cameraDOF * (ximlen/3);
+		updateHashTag();
+		drawFocus = true;
+	}
+
+	$("focus").onchange = function() {
+		focus = parseFloat($("focus").value);
+		updateHashTag();
+		drawFocus = true;
 	}
 
 	$('canvasControls').onmousedown = function(e)
@@ -1428,8 +1347,7 @@ function main()
 				console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
 				setZoom( (dx/ximlen)*zoom );
 				reset = 1;
-				setConstants();
-				getConstants();
+				setCamera();
 				draw(false);
 			}
 			box = null;
@@ -1450,41 +1368,12 @@ main();
 
 
 
-
-
 /*
- * Adjust aspect ratio based on plot ranges and canvas dimensions.
- */
-function adjustAspectRatio(xRange, yRange, canvas)
-{
-	var ratio = Math.abs(xRange[1]-xRange[0]) / Math.abs(yRange[1]-yRange[0]);
-	var sratio = canvas.width/canvas.height;
-	if ( sratio>ratio ) {
-		var xf = sratio/ratio;
-		xRange[0] *= xf;
-		xRange[1] *= xf;
-		screenZoom[0] *= xf;
-	} else {
-		var yf = ratio/sratio;
-		yRange[0] *= yf;
-		yRange[1] *= yf;
-		screenZoom[1] *= yf;
-	}
-	xRange = [lookAt[0]-screenZoom[0]/2, lookAt[0]+screenZoom[0]/2];
-	yRange = [lookAt[1]-screenZoom[1]/2, lookAt[1]+screenZoom[1]/2];
-	range_x = xRange[1] - xRange[0];
-	range_y = yRange[1] - yRange[0];
-}
-
-
-/*
- * Parse URL hash tag, returns whether we should redraw.
+ * Parse URL hash tag
  */
 function readHashTag()
 {
-	var redraw = false;
 	var tags = location.hash.split('&');
-
 	for ( var i=0; i<tags.length; ++i ) {
 		var tag = tags[i].split('=');
 		var key = tag[0];
@@ -1492,18 +1381,54 @@ function readHashTag()
 
 		switch ( key ) {
 			case '#zoom': {
-				var z = val.split(',');
-				screenZoom = [parseFloat(z[0]), parseFloat(z[1])];
-				console.log("readHashTag(): " + screenZoom);
+				zoom = parseFloat(val);
+				console.log("readHashTag() zoom : " + zoom);
+				break;
+			} 
+			case 'xcen': {
+				xcen = parseFloat(val);
+				console.log("readHashTag() xcen : " + xcen);
+				break;
+			} 
+			case 'ycen': {
+				ycen = parseFloat(val);
+				console.log("readHashTag() ycen : " + ycen);
 				redraw = true;
-			} break;
+				break;
+			} 
+			case 'power': {
+				power = parseFloat(val);
+				$("power").value = power;
+				console.log("readHashTag() power : " + power);
+				break;
+			}
+			case 'fog': {
+				fog_factor = parseFloat(val);
+				$("fog").value = fog_factor;
+				console.log("readHashTag() fog : " + fog_factor);
+				break;
+			} 
+			case 'primary_light': {
+				primary_light = parseFloat(val);
+				$("primary_light").value = primary_light;
+				console.log("readHashTag() primary_light : " + primary_light);
+				break;
+			}
+			case 'dof': {
+				cameraDOF = parseFloat(val);
+				factorDOF = cameraDOF * (ximlen/3);
+				$("DOF").value = cameraDOF;
+				console.log("readHashTag() dof : " + cameraDOF);
+				break;
+			}
+			case 'focus': {
+				focus = parseFloat(val);
+				$("focus").value = focus;
+				console.log("readHashTag() focus : " + focus);
+				break;
+			}
 		}
 	}
-
-	if ( redraw )
-		reInitCanvas = true;
-
-	return redraw;
 }
 
 
@@ -1512,96 +1437,11 @@ function readHashTag()
  */
 function updateHashTag()
 {
-	var alg = 0;
-
-	console.log("updateHashTag(): " + screenZoom);
-
-	location.hash = 'zoom=' + screenZoom + '&' +
-									'lookAt=' + lookAt + '&' +
-									'contrast=' + gradient + '&' +
-									'brightness=' + brightness;
-}
-
-/*
- * Update small info box in lower right hand side
- */
-function updateInfoBox()
-{
-	// Update infobox
-	$('infoBox').innerHTML =
-		'x<sub>0</sub>=' + xRange[0] + ' y<sub>0</sub>=' + yRange[0] + ' ' +
-		'x<sub>1</sub>=' + xRange[1] + ' y<sub>1</sub>=' + yRange[1] + ' ' +
-		'wxh=' + canvas.width + 'x' + canvas.height + ' ' + (canvas.width*canvas.height/1000000.0).toFixed(1) + 'MP pass: ' + renderPass;
+	console.log("updateHashTag(): " + zoom);
+	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus;
 }
 
 
 
-// geyser27.ppm 
-var pallet =
-[
- [100, 0, 0], [26, 5, 5], [77, 17, 6], [98, 45, 29],
- [124, 78, 66], [114, 129, 146], [115, 168, 193], [132, 179, 210],
- [152, 186, 220], [153, 176, 202], [142, 171, 181], [157, 169, 176],
- [165, 162, 158], [154, 131, 103], [149, 104, 73], [152, 98, 60],
- [140, 85, 46], [138, 67, 23], [163, 57, 6], [173, 55, 8],
- [179, 56, 3], [190, 61, 8], [208, 86, 7], [210, 110, 25],
- [221, 127, 29], [222, 150, 44], [226, 161, 53], [222, 159, 52],
- [222, 152, 60], [213, 148, 66], [193, 134, 70], [164, 146, 113],
- [138, 141, 159], [133, 144, 165], [154, 139, 122], [148, 108, 84],
- [158, 115, 69], [189, 121, 57], [198, 124, 48], [212, 136, 45],
- [224, 146, 39], [223, 143, 35], [222, 137, 31], [222, 136, 24],
- [221, 137, 18], [205, 101, 19], [198, 76, 4], [176, 60, 14],
- [148, 86, 43], [154, 110, 61], [141, 115, 89], [125, 168, 156],
- [126, 173, 199], [109, 156, 212], [105, 144, 195], [96, 120, 161],
- [71, 74, 121], [37, 58, 125], [26, 49, 119], [16, 42, 117],
- [17, 41, 115], [18, 38, 106], [35, 42, 95], [53, 36, 45],
- [59, 35, 35], [84, 25, 14], [98, 35, 15], [116, 48, 18],
- [121, 56, 23], [135, 72, 28], [142, 82, 36], [163, 103, 51],
- [178, 108, 56], [196, 123, 61], [214, 145, 68], [202, 165, 99],
- [182, 166, 149], [177, 174, 165], [175, 176, 165], [157, 168, 171],
- [135, 153, 167], [120, 125, 129], [126, 87, 69], [125, 82, 64],
- [126, 81, 63], [127, 75, 46], [137, 83, 37], [142, 82, 36],
- [142, 80, 35], [134, 70, 20], [116, 51, 9], [107, 38, 11],
- [97, 29, 7], [86, 25, 13], [87, 26, 8], [93, 28, 8],
- [103, 31, 6], [110, 40, 6], [111, 43, 7], [141, 28, 8],
- [143, 31, 7], [145, 34, 10], [148, 36, 6], [145, 39, 3],
- [128, 54, 22], [115, 51, 25], [99, 50, 25], [99, 47, 28],
- [102, 44, 27], [95, 42, 26], [53, 35, 43], [23, 38, 100],
- [14, 34, 103], [18, 28, 89], [18, 28, 89], [18, 28, 89],
- [34, 13, 12], [75, 15, 6], [85, 15, 2], [98, 23, 4],
- [101, 24, 2], [105, 32, 2], [106, 34, 2], [104, 37, 12],
- [100, 33, 14], [91, 30, 11], [88, 29, 11], [93, 38, 18],
- [96, 39, 24], [98, 47, 30], [69, 63, 76], [36, 54, 121],
- [49, 63, 118], [100, 68, 69], [114, 71, 55], [131, 86, 57],
- [159, 109, 61], [186, 112, 45], [200, 123, 46], [217, 143, 50],
- [221, 149, 55], [221, 147, 50], [211, 139, 54], [188, 119, 49],
- [175, 103, 38], [152, 85, 32], [165, 61, 23], [160, 43, 7],
- [163, 41, 6], [153, 31, 3], [156, 35, 7], [162, 41, 7],
- [164, 43, 5], [170, 53, 9], [182, 67, 12], [195, 110, 40],
- [213, 134, 48], [224, 152, 58], [223, 161, 67], [222, 154, 64],
- [195, 134, 61], [181, 119, 60], [156, 111, 61], [145, 104, 74],
- [126, 81, 65], [91, 91, 112], [114, 123, 157], [118, 163, 183],
- [127, 182, 196], [128, 186, 211], [132, 187, 192], [154, 193, 164],
- [167, 204, 164], [170, 202, 163], [180, 203, 188], [163, 198, 225],
- [139, 193, 222], [136, 192, 219], [119, 177, 225], [115, 173, 225],
- [112, 166, 225], [109, 154, 202], [113, 118, 144], [119, 77, 72],
- [112, 67, 52], [102, 53, 32], [102, 53, 33], [111, 67, 54],
- [90, 85, 91], [44, 63, 127], [32, 52, 121], [26, 46, 119],
- [18, 38, 109], [16, 31, 95], [16, 31, 95], [16, 31, 95],
- [16, 31, 95], [23, 21, 51], [33, 11, 21], [46, 37, 52],
- [55, 66, 120], [98, 107, 144], [133, 149, 176], [137, 158, 190],
- [121, 132, 164], [76, 86, 128], [40, 58, 125], [30, 50, 118],
- [27, 47, 121], [39, 50, 109], [107, 61, 46], [104, 57, 36],
- [110, 60, 40], [130, 82, 55], [153, 108, 60], [155, 114, 66],
- [186, 132, 68], [216, 177, 98], [221, 182, 114], [220, 213, 126],
- [223, 205, 147], [194, 197, 178], [174, 198, 177], [183, 184, 159],
- [192, 145, 102], [178, 111, 64], [170, 81, 28], [173, 58, 7],
- [173, 52, 7], [173, 50, 5], [167, 48, 2], [160, 47, 3],
- [158, 48, 2], [163, 51, 6], [174, 58, 8], [189, 97, 22],
- [209, 124, 41], [219, 144, 52], [219, 148, 62], [200, 138, 62],
- [187, 134, 72], [171, 156, 133], [167, 172, 160], [138, 150, 173],
- [126, 139, 157], [142, 106, 81], [117, 71, 55], [108, 50, 28],
- [98, 42, 18], [89, 28, 10], [81, 23, 6], [78, 14, 2],
- [78, 14, 1], [88, 14, 1], [98, 14, 1], [108, 14, 1],
-];
+
 
