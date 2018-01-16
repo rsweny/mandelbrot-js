@@ -167,12 +167,12 @@ var max_alpha = 1;
  * Initialize canvas
  */
 var canvas = $('canvasMandelbrot');
-canvas.width  = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width  = 1200;
+canvas.height = 1200;
 //
 var ccanvas = $('canvasControls');
-ccanvas.width  = window.innerWidth;
-ccanvas.height = window.innerHeight;
+ccanvas.width  = 1200;
+ccanvas.height = 1200;
 //
 var ctx = canvas.getContext('2d');
 var ctx_img = ctx.createImageData(canvas.width, canvas.height);
@@ -375,9 +375,9 @@ function gridpoints(yRow)
 				if (cameraPersp > 0) plot_start = 4;
 				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start)
 				{
-					red = 250;
+					green = 250;
 					blue = 90 + iter*2;
-					green = 20 + iter;
+					red = 20 + iter;
 					
 					for (var c = 0; c < iter; c++)
 					{
@@ -1216,7 +1216,6 @@ public boolean mouseDown(Event evt, int x, int y)
 
 function main()
 {
-	var box = null;
 
 	$('viewPNG').onclick = function(event)
 	{
@@ -1236,6 +1235,7 @@ function main()
 		updateHistogram();
 		updateHashTag();
 		console.log("gradient: " + gradient);
+		m_down = false;
 	}
 
 	$("brightnessSlider").onchange = function() {
@@ -1243,6 +1243,7 @@ function main()
 		updateHistogram();
 		updateHashTag();
 		console.log("brightness: " + brightness);
+		m_down = false;
 	}
 
 	$("primary_light").onchange = function() {
@@ -1278,79 +1279,76 @@ function main()
 	{
 		console.log("mouse down!");
 
-		var mousex = e.pageX - this.offsetLeft;
-		var mousey = e.pageY - this.offsetTop;
-		if ( box == null )
-			box = [mousex, mousey, 0, 0];
+		m_down = true;
 
-		console.log(e.pageX + " " + this.offsetLeft + " - " + e.pageY + " " + this.offsetTop);
+		xanchor = e.clientX - this.offsetLeft;
+		yanchor = e.clientY - this.offsetTop;
+
+		console.log(xanchor + " " + yanchor + " - " + this.offsetLeft + " " + this.offsetTop);
 	}
 
 	$('canvasControls').onmousemove = function(e)
 	{
-		if ( box != null ) {
-			m_down = true;
+		if (m_down)
+		{
+			
 			var c = ccanvas.getContext('2d');
 			c.lineWidth = 1;
 
 			// clear out old box first
 			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
+			xcurr = e.clientX - this.offsetLeft;
+			ycurr = e.clientY - this.offsetTop;
+
+			var dx = Math.abs(xcurr - xanchor);
+			var dy = Math.abs(ycurr - yanchor);
+
 			// draw new box
 			c.strokeStyle = '#FF3B03';
-			box[2] = e.pageX - this.offsetLeft;
-			box[3] = e.pageY - this.offsetTop;
-			var dx = Math.abs(box[2]-box[0]);
-			var dy = Math.abs(box[3]-box[1]);
-			c.strokeRect(box[0], box[1], dx, dy);
-
-			//print stuff
-			var newxcen = box[0] + dx/2.0;
-			var fx = ((newxcen - half_ximlen)/ximlen)*zoom;
-	
-			var newycen = box[1] + dy/2.0;
-			var fy = ((newycen - half_yimlen)/yimlen)*zoom;
+			c.strokeRect(xanchor, yanchor, dx, dy);
+			console.log(xanchor + " " + yanchor + " " + dx + " " + dy);
 		}
 	}
 
 	$('canvasControls').onmouseup = function(e)
 	{
 		console.log("mouse up!");
-		if ( box != null ) {
 
-			/*
-			 * Cleaer entire canvas
-			 */
-			var c = ccanvas.getContext('2d');
-			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
+		/*
+		 * Clear entire canvas
+		 */
+		var c = ccanvas.getContext('2d');
+		c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
 
-			/*
-			 * Do the zoom and restart render
-			 */
-			m_down = false;
-			var dx = Math.abs(box[2]-box[0]);
-			var dy = Math.abs(box[3]-box[1]);
-			if (dy > dx)  dx = dy;
+		/*
+		 * Do the zoom and restart render
+		 */
+		m_down = false;
+		xcurr = e.clientX - this.offsetLeft;
+		ycurr = e.clientY - this.offsetTop;
+
+		var dx = Math.abs(xcurr - xanchor);
+		var dy = Math.abs(ycurr - yanchor);
+		if (dy > dx)  dx = dy;
+		
+	    //make sure zoom isn't too small
+	   	if (dx > 10)
+	   	{
+			var newxcen = xanchor + dx/2.0;
+			newxcen = ((newxcen - half_ximlen)/ximlen)*zoom;
+			xcen = xcen - newxcen;
+
+			var newycen = yanchor + dx/2.0;
+			newycen = ((newycen - half_yimlen)/yimlen)*zoom;
+			ycen = ycen - newycen;
 			
-		    //make sure zoom isn't too small
-		   	if (dx > 10)
-		   	{
-				var newxcen = box[0] + dx/2.0;
-				newxcen = ((newxcen - half_ximlen)/ximlen)*zoom;
-				xcen = xcen - newxcen;
-
-				var newycen = box[1] + dx/2.0;
-				newycen = ((newycen - half_yimlen)/yimlen)*zoom;
-				ycen = ycen - newycen;
-				
-				console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
-				setZoom( (dx/ximlen)*zoom );
-				reset = 1;
-				setCamera();
-				draw(false);
-			}
-			box = null;
+			console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
+			setZoom( (dx/ximlen)*zoom );
+			reset = 1;
+			setCamera();
+			draw(false);
 		}
 	}
 
