@@ -624,7 +624,16 @@ function main()
 {
   $('viewPNG').onclick = function(event)
   {
-    window.location = canvas.toDataURL('image/png');
+    var string = canvas.toDataURL('image/png');
+    var iframe = "<iframe width='100%' height='100%' src='" + string + "'></iframe>"
+    var x = window.open();
+    x.document.open();
+    x.document.write(iframe);
+    x.document.close();
+
+    // as backup hide the controls for a bit to enable screenshot
+    document.getElementById("description").style.display = 'none';
+    setTimeout( function() { document.getElementById("description").style.display = 'block'; }, 9000 );
   };
 
   $('steps').onkeypress = function(event)
@@ -668,6 +677,11 @@ function main()
 
     $('canvasControls').onmousedown = function(e)
     {
+      if ( e.ctrlKey ) {
+        doOrbit = !doOrbit;
+        draw(getColorPicker(), getSamples());
+        return;
+      }
       if ( box == null )
         box = [e.clientX, e.clientY, 0, 0];
     }
@@ -721,6 +735,7 @@ function main()
           zoomOut(e);
           return;
         }
+
 
         /*
          * Cleaer entire canvas
