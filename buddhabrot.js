@@ -796,7 +796,16 @@ function main()
 {
 	$('viewPNG').onclick = function(event)
 	{
-		window.open(canvas.toDataURL('image/png'));
+		// as backup hide the controls for a bit to enable screenshot
+		document.getElementById("description").style.display = 'none';
+		setTimeout( function() { document.getElementById("description").style.display = 'block'; }, 9000 );
+
+		var string = canvas.toDataURL('image/png');
+		var iframe = "<iframe width='100%' height='100%' src='" + string + "'></iframe>"
+		var x = window.open();
+		x.document.open();
+		x.document.write(iframe);
+		x.document.close();
 	};
 
 	$("contrastSlider").onchange = function() {
