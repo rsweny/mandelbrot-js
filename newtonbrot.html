@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Newtonbrot Fractal in HTML5 Canvas &amp; JavaScript</title>
+    <style type="text/css">
+      body {
+        background-color: black;
+        padding: 0px;
+        margin: 0px;
+        font-size: 10pt;
+        text-shadow: 0px 1px 0px rgb(40, 40, 40);
+      }
+
+      a { color: #ccc; text-decoration: none; }
+      a:hover { color: #FF3B03; }
+
+      #bottom { color: #666; }
+      #bottom a { color: #666; }
+      #bottom a:hover { color: #FF3B03; }
+
+      #newtonCanvas {
+        background-color: black;
+        position: absolute;
+        left: 0px;
+        top: 0px;
+        z-index: 0;
+        padding: 0px;
+        margin: 0px;
+      }
+
+      #canvasControls {
+        background-color: transparent;
+        position: absolute;
+        left: 0px;
+        top: 0px;
+        z-index: 5;
+        padding: 0px;
+        margin: 0px;
+        width: 100%;
+        height: 100%;
+      }
+
+      #description {
+        z-index: 10;
+        position: absolute;
+        background-color: rgba(30, 30, 30, 0.6);
+        font-family: sans-serif;
+        padding: 20px;
+        margin: 20px;
+        border: 2px solid rgba(20, 20, 20, 0.6);
+        color: #FF3B03;
+        text-shadow: 0px 1px 0px rgb(40, 40, 40);
+        width: 310px;
+
+        user-select: none;
+        -moz-user-select: none;
+        -khtml-user-select: none;
+        -webkit-user-select: none;
+        -o-user-select: none;
+      }
+
+      #infoBox:hover {
+        background-color: rgba(30, 30, 30, 0.3);
+        color: #444;
+        border: #222 1px solid;
+      }
+
+      #infoBox {
+        text-align: right;
+        z-index: 10;
+        position: absolute;
+        right: 5px;
+        bottom: 5px;
+        padding: 5px;
+
+        background: transparent;
+        color: rgba(51, 51, 51, 0.1);
+        text-shadow: none;
+
+        font-family: sans-serif;
+        font-size: 8pt;
+      }
+
+      #description table {
+        color: #ccc;
+      }
+
+      #description input[type="text"] {
+        color: #ccc;
+        outline: none;
+        background-color: rgba(48, 48, 48, 0.3);
+        border-width: 1px;
+        border-color: #444;
+      }
+
+      #description select {
+        border: #444 1px solid;
+        color: #ccc;
+        outline: none;
+        background-color: #333;
+        -webkit-appearance: none;
+        font-size: 10pt;
+      }
+
+      .headerText { color: #666; }
+
+      #description .textInput {
+        text-align: right;
+        background-color: transparent;
+        border: #444 1px solid;
+        font-size: 10pt;
+      }
+
+      .depthR { color: #ff6060; }
+      .depthG { color: #60ff60; }
+      .depthB { color: #6090ff; }
+
+      hr { border-color: #222; }
+    </style>
+  </head>
+  <body>
+    <div id="description">
+      <header>
+        <div style="text-align: center;">
+          <hr />
+          <h1>Newtonbrot</h1>
+          <p class="headerText">Newton's Method Fractal &mdash; HTML5 Canvas &amp; JavaScript</p>
+          <hr />
+        </div>
+      </header>
+
+      <form id="settingsForm" action="javascript:draw(true);">
+        <table>
+          <tr>
+            <td colspan="2"><span id="status">—</span></td>
+          </tr>
+          <tr>
+            <td>Algorithm</td>
+            <td>
+              <select id="algMode">
+                <option value="0">z^n - 3z^5 + 6z^3 - 3z + 3</option>
+                <option value="1">z^n - 1  (unity roots)</option>
+                <option value="2">z^10 + 0.2i·z^n - 1</option>
+                <option value="3">(z^n - 1) / z</option>
+                <option value="4">z^c - z + 0.1</option>
+                <option value="5">z^n - 1/z</option>
+              </select>
+            </td>
+          </tr>
+          <tr>
+            <td>Real Exponent</td>
+            <td><input class="textInput" size="12" type="text" id="order" value="4.9242613" /></td>
+          </tr>
+          <tr>
+            <td>Imaginary Exp.</td>
+            <td><input class="textInput" size="12" type="text" id="imgOrder" value="0.4841751596941611" /></td>
+          </tr>
+          <tr>
+            <td>Complex Error</td>
+            <td><input class="textInput" size="6" type="text" id="complexError" value="1" /></td>
+          </tr>
+          <tr>
+            <td>Zoom</td>
+            <td><input class="textInput" size="8" type="text" id="zoom" value="6" /></td>
+          </tr>
+          <tr>
+            <td>Center X</td>
+            <td><input class="textInput" size="10" type="text" id="xcen" value="0.1" /></td>
+          </tr>
+          <tr>
+            <td>Center Y</td>
+            <td><input class="textInput" size="10" type="text" id="ycen" value="0" /></td>
+          </tr>
+          <tr>
+            <td>Contrast</td>
+            <td><input id="contrastSlider" type="range" min="1" max="30" value="11"/></td>
+          </tr>
+          <tr>
+            <td>Brightness</td>
+            <td><input id="brightnessSlider" type="range" min="1" max="500" value="200"/></td>
+          </tr>
+          <tr>
+            <td>Depth <span class="depthR">R</span>/<span class="depthG">G</span>/<span class="depthB">B</span></td>
+            <td>
+              <input class="textInput depthR" size="4" type="text" id="depthRed"   value="200" />
+              <input class="textInput depthG" size="4" type="text" id="depthGreen" value="140" />
+              <input class="textInput depthB" size="4" type="text" id="depthBlue"  value="40"  />
+            </td>
+          </tr>
+          <tr>
+            <td>Points/pass</td>
+            <td><input class="textInput" size="6" type="text" id="numPoints" value="1000" /></td>
+          </tr>
+          <tr>
+            <td>Palette</td>
+            <td>
+              <select id="palIndex">
+                <option value="0">Rainbow</option>
+                <option value="1">Blue→Red</option>
+                <option value="2">Fire</option>
+                <option value="3">Ocean</option>
+                <option value="4">Green-Blue</option>
+                <option value="5">Pink-Purple</option>
+                <option value="6">Rainbow II</option>
+                <option value="7">Blue→Red II</option>
+                <option value="8">Fire II</option>
+                <option value="9">Ocean II</option>
+                <option value="10">Green-Blue II</option>
+                <option value="11">Pink-Purple II</option>
+              </select>
+            </td>
+          </tr>
+          <tr>
+            <td>By Structure</td>
+            <td><input type="checkbox" id="byStructure" checked /></td>
+          </tr>
+          <tr>
+            <td>Inverse</td>
+            <td><input type="checkbox" id="doInverse" /></td>
+          </tr>
+          <tr>
+            <td>Mandelbrot Add</td>
+            <td><input type="checkbox" id="mandelbrotAdd" /></td>
+          </tr>
+          <tr>
+            <td colspan="2">&nbsp;</td>
+          </tr>
+          <tr>
+            <td colspan="2">
+              <input type="submit" id="drawButton" value="Draw" />
+              &nbsp;
+              <input type="button" id="resetButton" value="Reset" />
+              &nbsp;
+              <input type="button" id="viewPNG" value="Save PNG" />
+            </td>
+          </tr>
+        </table>
+      </form>
+
+      <hr/>
+
+      <div id="bottom">
+        <small>
+          Made by Ryan Sweny<br/>
+          HTML5 based on <a href="http://csl.sublevel3.org">Christian Stigen Larsen</a> &mdash;
+          <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
+          <br/>&nbsp;<br/>
+          <b>Left-drag</b> to zoom in.
+          <b>Alt+click</b> cycles algorithm.
+          <b>Ctrl+click</b> toggles By Structure.
+          <b>Shift+click</b> cycles palette.
+          <b>Right-click</b> hides panel.
+          <b>Ctrl+right</b> toggles Inverse.
+          <b>Ctrl+Shift+right</b> toggles Mandelbrot Addition.
+          <br/>&nbsp;<br/>
+          Live versions:
+          <a href='mandelbrot.html'>mandelbrot</a> |
+          <a href='buddhabrot.html'>buddhabrot</a> |
+          <a href='newton.html'>newton</a> |
+          <a href='taylor.html'>taylor</a> |
+          <a href='newtonbrot.html'>newtonbrot</a>
+        </small>
+      </div>
+    </div>
+
+    <div id="canvasContainer">
+      <canvas id="newtonCanvas"    width="0" height="0"></canvas>
+      <canvas id="canvasControls"  width="0" height="0"></canvas>
+    </div>
+
+    <div id="infoBox">
+      <span id="infoText"></span>
+    </div>
+
+    <script type="text/javascript" src="newtonbrot.js"></script>
+  </body>
+</html>

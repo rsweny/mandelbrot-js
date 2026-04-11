@@ -3,13 +3,7 @@ Mandelbrot.js
 
 Vanilla Mandelbrot Set renderer in HTML5 canvas and javascript.
 
-Live versions: http://cabin.stasis.org/mandelbrot.html | http://cabin.stasis.org/buddhabrot.html | http://cabin.stasis.org/newton.html
-
-Author
-------
-Written by Christian Stigen Larsen
-
-http://csl.sublevel3.org
+[Mandelbrot](http://rsweny.github.io/mandelbrot-js/mandelbrot.html) | [Buddhabrot](http://rsweny.github.io/mandelbrot-js/buddhabrot.html) | [Mandelbulb](http://rsweny.github.io/mandelbrot-js/mandelbulb.html) | [Newton](http://rsweny.github.io/mandelbrot-js/newton.html) | [Newtonbrot](http://rsweny.github.io/mandelbrot-js/newtonbrot.html) | [Taylor](http://rsweny.github.io/mandelbrot-js/taylor.html)
 
 Theory
 ------
@@ -326,6 +320,13 @@ Take a look at the optimizations done to the Mandelbrot set in
 
 There are a lot of cool tricks going on there.  Most of _those_ use SSE
 parallelism for hardware speedup or offloads to the GPU.
+
+
+Older Versions
+--------------
+
+http://cabin.stasis.org/mandelbrot.html | http://cabin.stasis.org/buddhabrot.html | http://cabin.stasis.org/newton.html
+
 
 License
 -------
