@@ -1,7 +1,4 @@
-Mandelbrot.js
-=============
-
-Vanilla Mandelbrot Set renderer in HTML5 canvas and javascript.
+Mandelbrot Set renderer in HTML5 canvas and javascript.
 
 [Mandelbrot](http://rsweny.github.io/mandelbrot-js/mandelbrot.html) | [Buddhabrot](http://rsweny.github.io/mandelbrot-js/buddhabrot.html) | [Mandelbulb](http://rsweny.github.io/mandelbrot-js/mandelbulb.html) | [Newton](http://rsweny.github.io/mandelbrot-js/newton.html) | [Newtonbrot](http://rsweny.github.io/mandelbrot-js/newtonbrot.html) | [Taylor](http://rsweny.github.io/mandelbrot-js/taylor.html)
 

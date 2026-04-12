@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>3D Flame Fractal in HTML5 Canvas &amp; JavaScript</title>
+
+    <style type="text/css">
+      body {
+        background-color: #222222;
+        padding: 0px;
+        margin: 0px;
+        font-size: 10pt;
+        text-shadow: 0px 1px 0px rgb(40, 40, 40);
+      }
+
+      a { color: #ccc; text-decoration: none; }
+      a:hover { color: #FF3B03; }
+
+      #bottom { color: #666; }
+      #bottom a { color: #666; }
+      #bottom a:hover { color: #FF3B03; }
+
+      #canvasFlame {
+        background-color: black;
+        position: absolute;
+        left: 380px;
+        top: 0px;
+        z-index: 0;
+        padding: 0px;
+        margin: 0px;
+      }
+
+      #canvasControls {
+        background-color: transparent;
+        position: absolute;
+        left: 380px;
+        top: 0px;
+        z-index: 5;
+        padding: 0px;
+        margin: 0px;
+      }
+
+      #description {
+        z-index: 10;
+        position: absolute;
+        background-color: rgba(30, 30, 30, 0.6);
+        font-family: sans-serif;
+        padding: 20px;
+        margin: 20px;
+        border: 2px solid rgba(20, 20, 20, 0.6);
+        color: #FF3B03;
+        text-shadow: 0px 1px 0px rgb(40, 40, 40);
+        width: 300px;
+        user-select: none;
+      }
+
+      #description table {
+        color: #ccc;
+      }
+
+      #description input[type="number"],
+      #description input[type="text"] {
+        color: #ccc;
+        outline: none;
+        background-color: rgba(48,48,48,0.3);
+        border-width: 1px;
+        border-color: #444;
+      }
+
+      #description select {
+        border: #444 1px solid;
+        color: #ccc;
+        outline: none;
+        background-color: #333;
+        appearance: none;
+        font-size: 10pt;
+      }
+
+      #description textarea {
+        width: 100%;
+        background-color: rgba(30,30,30,0.8);
+        color: #aaa;
+        border: 1px solid #444;
+        font-family: monospace;
+        font-size: 8pt;
+        resize: vertical;
+        outline: none;
+      }
+
+      .headerText {
+        color: #666;
+      }
+
+      .sectionHeader {
+        color: #888;
+        font-size: 9pt;
+        padding-top: 6px;
+      }
+
+      #description .textInput {
+        text-align: right;
+        background-color: transparent;
+        border: #444 1px solid;
+        font-size: 10pt;
+      }
+
+      hr {
+        border-color: #222;
+      }
+
+      input[type="submit"], button {
+        background-color: #333;
+        color: #ccc;
+        border: 1px solid #555;
+        cursor: pointer;
+        padding: 3px 8px;
+      }
+      input[type="submit"]:hover, button:hover {
+        background-color: #444;
+        color: #FF3B03;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="description">
+      <header>
+        <div style="text-align: center;">
+          <hr />
+          <h1>3D Flame Fractal</h1>
+          <p class="headerText">In HTML5 Canvas and JavaScript</p>
+          <hr />
+        </div>
+      </header>
+
+      <form id="settingsForm" action="javascript:void(0);">
+        <table width="100%">
+
+          <tr>
+            <td>Zoom</td>
+            <td><input id="zoomInput" class="textInput" type="number" value="1.0" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>X Center</td>
+            <td><input id="xcenInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Y Center</td>
+            <td><input id="ycenInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+          </tr>
+
+          <tr>
+            <td>Render time</td>
+            <td><span id="renderTime">0.0</span></td>
+          </tr>
+          <tr>
+            <td>Speed</td>
+            <td><span id="renderSpeed">0</span></td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">Display</td></tr>
+
+          <tr>
+            <td>Contrast</td>
+            <td>
+              <input id="contrastSlider" type="range" min="1" max="150" value="30"/>
+            </td>
+          </tr>
+          <tr>
+            <td>Brightness</td>
+            <td>
+              <input id="brightnessSlider" type="range" min="10" max="500" value="150"/>
+            </td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">3D Camera</td></tr>
+
+          <tr>
+            <td>Perspective</td>
+            <td><input id="perspInput" class="textInput" type="number" value="0.9" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Z Position</td>
+            <td><input id="zposInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Camera Yaw</td>
+            <td><input id="yawInput" class="textInput" type="number" value="0.3" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Camera Pitch</td>
+            <td><input id="pitchInput" class="textInput" type="number" value="0.86" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Depth of Field</td>
+            <td><input id="dofInput" class="textInput" type="number" value="0.01" step="0.001"/></td>
+          </tr>
+          <tr>
+            <td>Focus</td>
+            <td><input id="focusInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">Render</td></tr>
+
+          <tr>
+            <td>Opacity</td>
+            <td><input id="opacityInput" class="textInput" type="number" value="0.9" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Glow</td>
+            <td><input id="glowInput" class="textInput" type="number" value="0.1" step="0.01"/></td>
+          </tr>
+          <tr>
+            <td>Horizon</td>
+            <td><input id="horizonInput" class="textInput" type="number" value="1.0" step="0.1"/></td>
+          </tr>
+          <tr>
+            <td>Foreground</td>
+            <td><input id="zresInput" class="textInput" type="number" value="0.96" step="0.01"/></td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">Color Palette</td></tr>
+
+          <tr>
+            <td colspan="2">
+              <select id="colorPalette">
+                <option value="Geyser" selected>Geyser</option>
+                <option value="Afternoon Beach">Afternoon Beach</option>
+                <option value="Dim Beach">Dim Beach</option>
+                <option value="Meadow">Meadow</option>
+                <option value="Tan">Tan</option>
+                <option value="Cool Blue">Cool Blue</option>
+                <option value="Harvest">Harvest</option>
+                <option value="Dark Rose">Dark Rose</option>
+                <option value="Ice Dragon">Ice Dragon</option>
+                <option value="Warm Gold">Warm Gold</option>
+                <option value="Spectral">Spectral</option>
+                <option value="Rainbow">Rainbow</option>
+              </select>
+            </td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">Formula (density sym color c-matrix v)</td></tr>
+          <tr>
+            <td colspan="2">
+              <textarea id="formulaInput" rows="8"></textarea>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2">&nbsp;</td>
+          </tr>
+          <tr>
+            <td colspan="2">
+              <input type="submit" id="drawBtn" value="Draw" />
+              &nbsp;
+              <button type="button" id="randomBtn">Random</button>
+              &nbsp;
+              <button type="button" id="randomCBtn">Rnd C</button>
+              &nbsp;
+              <button type="button" id="viewPNG">Save PNG</button>
+            </td>
+          </tr>
+
+        </table>
+      </form>
+
+      <hr/>
+
+      <div id="bottom">
+        <small>
+          <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
+          <br/> Click+drag to zoom in.
+          <br/> Random: new random flame.
+          <br/> Rnd C: randomize affine coefficients.
+          <br/><br/>Live versions:
+          <a href='mandelbrot.html'>mandelbrot</a> |
+          <a href='buddhabrot.html'>buddhabrot</a> |
+          <a href='newton.html'>newton</a> |
+          <a href='mandelbulb.html'>mandelbulb</a> |
+          <a href='taylor.html'>taylor</a> |
+          <a href='newtonbrot.html'>newtonbrot</a> |
+          <a href='flame.html'>flame</a>
+        </small>
+      </div>
+    </div>
+
+    <div id="canvasContainer">
+      <canvas id="canvasFlame"    width="0" height="0"> </canvas>
+      <canvas id="canvasControls" width="0" height="0"> </canvas>
+    </div>
+
+    <script type="text/javascript" src="palettes.js"></script>
+    <script type="text/javascript" src="flame.js"></script>
+
+  </body>
+</html>
