@@ -1,8 +1,8 @@
 /*
- * The Mandelbrot Set, in HTML5 canvas and javascript.
- * https://github.com/cslarsen/mandelbrot-js
+ * The Mandelbrot Set accumulation traces, in HTML5 canvas and javascript.
+ * https://github.com/rsweny/mandelbrot-js
  *
- * Copyright (C) 2012 Christian Stigen Larsen
+ * Copyright (C) 2018 Ryan Sweny
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.  You may obtain
@@ -18,10 +18,6 @@
  *
  */
 
-/*
- * Global variables:
- */
-
 var mode = 0;
 
 var pointsPerPass = 1500;
@@ -29,7 +25,7 @@ var renderPass = 0;
 var max_depth;
 var img_cache;
 var img_red;
-var img_gree;
+var img_green;
 var img_blue;
 var depth_blue = 60;
 var depth_green = 100;
@@ -70,7 +66,6 @@ var range_x;
 var range_y;
 var interiorColor = [0, 0, 0, 255];
 var reInitCanvas = true; // Whether to reload canvas size, etc
-var dragToZoom = true;
 var colors = [[0,0,0,0]];
 var renderId = 0; // To zoom before current render is finished
 
@@ -545,7 +540,7 @@ function render()
 		 * do something in between.
 		 */
 		//drawRandomPass();
-		var now = (new Date).getTime();
+		const now = Date.now();
 		if (sy++ < canvas.height && zoom[0] > 3) {
 			drawLinePass(Ci, xRange[0], dx);
 			Ci += dy;
@@ -579,7 +574,7 @@ function render()
         }
 
         // yield control back to browser, so that canvas is updated
-        setTimeout(scanline, 10);
+        setTimeout(scanline, 0);
 
 	};
 
@@ -597,28 +592,25 @@ function updateHashTag()
 	console.log("updateHashTag(): " + zoom);
 
 	location.hash = 'zoom=' + zoom + '&' +
-									'lookAt=' + lookAt + '&' +
-									'contrast=' + gradient + '&' +
-									'brightness=' + brightness + '&' +
-									'red=' + depth_red + '&' +
-									'green=' + depth_green + '&' +
-									'blue=' + depth_blue + '&' +
-									'juliax=' + juliax + '&' +
-									'juliay=' + juliay + '&' +
-									'algorithm=' + alg;
+		'lookAt=' + lookAt + '&' +
+		'contrast=' + gradient + '&' +
+		'brightness=' + brightness + '&' +
+		'red=' + depth_red + '&' +
+		'green=' + depth_green + '&' +
+		'blue=' + depth_blue + '&' +
+		'juliax=' + juliax + '&' +
+		'juliay=' + juliay + '&' +
+		'algorithm=' + alg;
 }
 
-/*
- * Update small info box in lower right hand side
- */
-function updateInfoBox()
-{
+// Update small info box in lower right hand side
+function updateInfoBox() {
 	// Update infobox
 	$('infoBox').innerHTML =
 		'x<sub>0</sub>=' + xRange[0] + ' y<sub>0</sub>=' + yRange[0] + ' ' +
 		'x<sub>1</sub>=' + xRange[1] + ' y<sub>1</sub>=' + yRange[1] + ' ' +
-		'wxh=' + canvas.width + 'x' + canvas.height + ' '
-				+ (canvas.width*canvas.height/1000000.0).toFixed(1) + 'MP pass: ' + renderPass + ' accepted %' + ( Math.floor( (accepted*10000.0001)/(rejected+accepted+1.1) ) / 100.0);
+		+ canvas.width + 'x' + canvas.height + ' '
+		+ (canvas.width*canvas.height/1000000.0).toFixed(1) + 'MP pass: ' + renderPass + ' accepted ' + ( Math.floor( (accepted*10000.0001)/(rejected+accepted+1.1) ) / 100.0) + '%';
 }
 
 /*
@@ -765,36 +757,19 @@ function doJulia (event) {
 	draw();
 }
 
-function zoomOut (event) {
-	var x = event.clientX;
-	var y = event.clientY;
-
-	var dx = (xRange[1] - xRange[0]) / canvas.width;
-	var dy = (yRange[1] - yRange[0]) / canvas.height;
-
-	x = xRange[0] + x*dx;
-	y = yRange[0] + y*dy;
-
-	lookAt = [x, y];
-
-	if ( event.shiftKey ) {
-		zoom[0] /= 0.5;
-		zoom[1] /= 0.5;
-	}
-	draw();
-}
-
 /*
  * When resizing the window, be sure to update all the canvas stuff.
  */
-window.onresize = function(event)
+window.onresize = function(_e)
 {
 	reInitCanvas = true;
 };
 
 function main()
 {
-	$('viewPNG').onclick = function(event)
+	let box = null;
+
+	$('viewPNG').onclick = function(_e)
 	{
 		var link = document.createElement('a');
 		link.download = 'buddhabrot.png';
@@ -862,8 +837,7 @@ function main()
 		draw();
 	}
 
-	$('resetButton').onclick = function(even)
-	{
+	$('resetButton').onclick = function(_e) {
 		$('settingsForm').reset();
 		setTimeout(function() { location.hash = ''; }, 1);
 		zoom = [zoomStart, zoomStart];
@@ -873,56 +847,47 @@ function main()
 		draw();
 	};
 
-	if ( dragToZoom == true ) {
-		var box = null;
-
-		$('canvasControls').onmousedown = function(e)
-		{
-			if ( e.shiftKey ) {
-				doJulia(e);
-				return;
-			}
-			else if ( box == null )
-				box = [e.clientX, e.clientY, 0, 0];
+	$('canvasControls').onmousedown = function(e) {
+		if (e.shiftKey) {
+			doJulia(e);
+			return;
+		} else if (box == null && e.button === 0) {
+			console.log("made new box")
+			box = [e.clientX, e.clientY, 0, 0];
 		}
+	}
 
-		$('canvasControls').onmousemove = function(e)
-		{
-			if ( box != null ) {
-				var c = ccanvas.getContext('2d');
-				c.lineWidth = 1;
+	$('canvasControls').onmousemove = function(e) {
+		if (box != null) {
+			var c = ccanvas.getContext('2d');
+			c.lineWidth = 1;
 
-				// clear out old box first
-				c.clearRect(0, 0, ccanvas.width, ccanvas.height);
+			// clear out old box first
+			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
-				// draw new box
-				c.strokeStyle = '#FF3B03';
-				box[2] = e.clientX;
-				box[3] = e.clientY;
-				c.strokeRect(box[0], box[1], box[2]-box[0], box[3]-box[1]);
-			}
+			// draw new box
+			c.strokeStyle = '#FF3B03';
+			box[2] = e.clientX;
+			box[3] = e.clientY;
+			c.strokeRect(box[0], box[1], box[2]-box[0], box[3]-box[1]);
 		}
+	}
 
-		$('canvasControls').onmouseup = function(e)
-		{
-			console.log("mouse up!");
-			if ( box != null ) {
-				// Zoom out?
-				if ( e.shiftKey ) {
-					box = null;
-					zoomOut(e);
-					return;
-				}
+	$('canvasControls').onmouseup = function(e) {
 
+		var diffx = Math.abs(box[0]-box[2]);
+		var diffy = Math.abs(box[1]-box[3]);
+		console.log("mouse up!");
+
+		if (box != null && e.button === 0) {
+			if (diffx > 100 && diffy > 100 && box[2] > 0 && box[3] > 0) {
+				console.log("mouse up! reset " + diffx + " " + diffy);
+				console.log(box);
 				/*
-				 * Cleaer entire canvas
-				 */
+				* Clear and calculate new rectangle to render
+				*/
 				var c = ccanvas.getContext('2d');
 				c.clearRect(0, 0, ccanvas.width, ccanvas.height);
-
-				/*
-				 * Calculate new rectangle to render
-				 */
 				var x = Math.min(box[0], box[2]) + Math.abs(box[0] - box[2]) / 2.0;
 				var y = Math.min(box[1], box[3]) + Math.abs(box[1] - box[3]) / 2.0;
 
@@ -934,58 +899,19 @@ function main()
 
 				lookAt = [x, y];
 
-				/*
-				 * This whole code is such a mess ...
-				 */
-
-				var xf = Math.abs(Math.abs(box[0]-box[2])/canvas.width);
-				var yf = Math.abs(Math.abs(box[1]-box[3])/canvas.height);
+				var xf = Math.abs(diffx/canvas.width);
+				var yf = Math.abs(diffy/canvas.height);
 
 				zoom[0] *= Math.max(xf, yf); // retain aspect ratio
 				zoom[1] *= Math.max(xf, yf);
 
-				box = null;
 				draw();
 			}
+			box = null;
 		}
 	}
 
-	/*
-	 * Enable zooming (currently, the zooming is inexact!) Click to zoom;
-	 * perfect to mobile phones, etc.
-	 */
-	if ( dragToZoom == false ) {
-		$('canvasMandelbrot').onclick = function(event)
-		{
-			var x = event.clientX;
-			var y = event.clientY;
-			var w = window.innerWidth;
-			var h = window.innerHeight;
-
-			var dx = (xRange[1] - xRange[0]) / canvas.width;
-			var dy = (yRange[1] - yRange[0]) / canvas.height;
-
-			x = xRange[0] + x*dx;
-			y = yRange[0] + y*dy;
-
-			lookAt = [x, y];
-
-			if ( event.shiftKey ) {
-				zoom[0] /= 0.5;
-				zoom[1] /= 0.5;
-			} else {
-				zoom[0] *= 0.5;
-				zoom[1] *= 0.5;
-			}
-
-			draw();
-		};
-	}
-
-
-	/*
-	 * Read hash tag and render away at page load.
-	 */
+	// Read hash tag and render away at page load.
 	readHashTag();
 	draw();
 }

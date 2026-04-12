@@ -1,6 +1,6 @@
 /*
  * The Mandelbrot Set, in HTML5 canvas and javascript.
- * https://github.com/cslarsen/mandelbrot-js
+ * https://github.com/rsweny/mandelbrot-js
  *
  * Copyright (C) 2012 Christian Stigen Larsen
  *
@@ -18,9 +18,6 @@
  *
  */
 
-/*
- * Global variables:
- */
 var zoomStart = 3.4;
 var zoom = [zoomStart, zoomStart];
 var lookAtDefault = [-0.6, 0.01];
@@ -342,7 +339,7 @@ function draw(pickColor, superSamples)
 
           var speed = Math.floor(pixels / elapsedMS);
 
-          if ( metric_units(speed).substr(0,3)=="NaN" ) {
+          if ( metric_units(speed).substring(0,3)=="NaN" ) {
             speed = Math.floor(60.0*pixels / elapsedMS);
             $('renderSpeedUnit').innerHTML = 'minute';
           } else
@@ -630,10 +627,10 @@ function main()
     link.click();
   };
 
-  $('steps').onkeypress = function(event)
-  {
+  $('steps').onkeyup = function(event) {
     // disable auto-iterations when user edits it manually
     $('autoIterations').checked = false;
+    draw(getColorPicker(), getSamples());
   }
 
 	$("contrastSlider").onchange = function() {
@@ -750,10 +747,6 @@ function main()
         y = yRange[0] + y*dy;
 
         lookAt = [x, y];
-
-        /*
-         * This whole code is such a mess ...
-         */
 
         var xf = Math.abs(Math.abs(box[0]-box[2])/canvas.width);
         var yf = Math.abs(Math.abs(box[1]-box[3])/canvas.height);

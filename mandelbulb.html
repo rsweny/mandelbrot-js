@@ -128,6 +128,21 @@
       <form id="settingsForm" action="javascript:reDraw();">
         <table>
         <tr>
+        <td>Zoom</td>
+        <td><input id="zoomInput" class="textInput" type="number" value="3.0" step="0.01"/></td>
+        </tr>
+
+        <tr>
+        <td>X Center</td>
+        <td><input id="xcenInput" class="textInput" type="number" value="0.0" step="0.001"/></td>
+        </tr>
+
+        <tr>
+        <td>Y Center</td>
+        <td><input id="ycenInput" class="textInput" type="number" value="0.0" step="0.001"/></td>
+        </tr>
+
+        <tr>
           <td>Rendering time</td>
           <td>
             <span id='renderTime'>0.0</span></td>
@@ -146,12 +161,22 @@
 
         <tr>
         <td>Contrast</td>
-        <td><input id="contrastSlider" type="range" min="1" max="100" value="70"/></td>
+        <td><input id="contrastSlider" type="range" min="1" max="150" value="50"/></td>
         <tr>
 
         <tr>
         <td>Brightness</td>
-        <td><input id="brightnessSlider" type="range" min="1" max="500" value="140"/></td>
+        <td><input id="brightnessSlider" type="range" min="1" max="500" value="180"/></td>
+        </tr>
+
+        <tr>
+        <td>Camera Yaw</td>
+        <td><input id="cameraYaw" type="number" min="-3.14159" max="3.14159" value="0.1" step="0.01"/></td>
+        </tr>
+
+        <tr>
+        <td>Camera Pitch</td>
+        <td><input id="cameraPitch" type="number" min="-1.5707" max="1.5707" value="0.75" step="0.01"/></td>
         </tr>
 
         <tr>
@@ -171,9 +196,44 @@
 
         <tr>
         <td>Trace Glow</td>
-        <td><input id="fog" type="number" min="0" max="4" value="0.94" step="0.01"/></td>
+        <td><input id="fog" type="number" min="0" max="2" value="0.01" step="0.01"/></td>
         </tr>
 
+        <tr>
+        <td>Glow Color</td>
+        <td><input id="fogColor" type="color" value="#fafafa"/></td>
+        </tr>
+
+
+        <tr>
+        <td>Color Palette</td>
+        <td>
+          <select id="colorPalette">
+            <option value="Geyser" selected>Geyser</option>
+            <option value="Afternoon Beach">Afternoon Beach</option>
+            <option value="Dim Beach">Dim Beach</option>
+            <option value="Meadow">Meadow</option>
+            <option value="Tan">Tan</option>
+            <option value="Cool Blue">Cool Blue</option>
+            <option value="Harvest">Harvest</option>
+            <option value="Dark Rose">Dark Rose</option>
+            <option value="Ice Dragon">Ice Dragon</option>
+            <option value="Warm Gold">Warm Gold</option>
+            <option value="Spectral">Spectral</option>
+            <option value="Rainbow">Rainbow</option>
+          </select>
+        </td>
+        </tr>
+
+        <tr>
+        <td>Formula</td>
+        <td>
+          <select id="formulaSelect">
+            <option value="0" selected>Sin (2D compatible)</option>
+            <option value="1">Cos (Wikipedia)</option>
+          </select>
+        </td>
+        </tr>
 
         <tr>
           <td colspan="2">&nbsp;</td>
@@ -193,7 +253,16 @@
         <small>
           <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
           <br/> Click+drag to zoom in.<br/>
-          <br/>Other versions: <a href='mandelbrot.html'>mandelbrot</a> | <a href='buddhabrot.html'>buddhabrot</a> | <a href='newton.html'>newton</a> | <a href='mandelbulb.html'>MandelBulb</a>
+          <br/> Shift+click to temporarily show focus planes<br/>
+          <br/> Ctrl+click to inverse the azimuth<br/>
+          <br/>Live versions:
+          <a href='mandelbrot.html'>mandelbrot</a> |
+          <a href='buddhabrot.html'>buddhabrot</a> |
+          <a href='newton.html'>newton</a> |
+          <a href='mandelbulb.html'>mandelbulb</a> |
+          <a href='taylor.html'>taylor</a> |
+          <a href='newtonbrot.html'>newtonbrot</a> |
+          <a href='flame.html'>flame</a>
         </small>
       </div>
     </div>
@@ -203,6 +272,7 @@
       <canvas id="canvasControls" width="0" height="0"> </canvas>
     </div>
 
+    <script type="text/javascript" src="palettes.js"></script>
     <script type="text/javascript" src="mandelbulb.js"></script>
 
   </body>

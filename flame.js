@@ -61,6 +61,7 @@ var iterCount     = 0;
 
 // Palette
 var pallet = null;
+let selectedPreset = "";
 
 // Mouse / UI state
 var xcurr, ycurr, xanchor, yanchor;
@@ -746,7 +747,7 @@ function render() {
             var now     = (new Date()).getTime();
             var elapsed = (now - t1) / 1000.0;
             $('renderTime').innerHTML  = elapsed.toFixed(1) + "s  pass: " + renderpass;
-            $('renderSpeed').innerHTML = Math.floor(iterCount / elapsed) + " iter/s";
+            $('renderSpeed').innerHTML = Math.floor(iterCount / (elapsed*1000)) + "k iter/s";
         }
     }
 
@@ -774,6 +775,15 @@ function init() {
 
     pallet = palettes["Geyser"];
 
+    const sel = $('presetSelect');
+    FLAME_PRESETS.forEach(function(preset, i) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = preset.name;
+        opt.selected = i == selectedPreset
+        sel.appendChild(opt);
+    });
+
     loadDefault();
     setCamera();
     clearScreenAndReset();
@@ -789,7 +799,7 @@ function main() {
 
     $('viewPNG').onclick = function() {
         var link = document.createElement('a');
-        link.download = 'flame.png';
+        link.download = 'flame-' + renderpass + '.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
     };
@@ -842,38 +852,41 @@ function main() {
 
     // Mouse: click+drag to zoom
     $('canvasControls').onmousedown = function(e) {
+        var rect = ccanvas.getBoundingClientRect();
         m_down  = true;
-        xanchor = e.clientX - this.offsetLeft;
-        yanchor = e.clientY - this.offsetTop;
+        xanchor = e.clientX - rect.left;
+        yanchor = e.clientY - rect.top;
     };
 
     $('canvasControls').onmousemove = function(e) {
         if (!m_down) return;
-        var c  = ccanvas.getContext('2d');
+        var c    = ccanvas.getContext('2d');
+        var rect = ccanvas.getBoundingClientRect();
         c.clearRect(0, 0, ccanvas.width, ccanvas.height);
-        xcurr  = e.clientX - this.offsetLeft;
-        ycurr  = e.clientY - this.offsetTop;
-        var dx = Math.abs(xcurr - xanchor);
-        var dy = Math.abs(ycurr - yanchor);
+        xcurr  = e.clientX - rect.left;
+        ycurr  = e.clientY - rect.top;
         c.strokeStyle = '#FF3B03';
         c.lineWidth   = 1;
-        c.strokeRect(xanchor, yanchor, dx, dy);
+        c.strokeRect(xanchor, yanchor, xcurr - xanchor, ycurr - yanchor);
     };
 
     $('canvasControls').onmouseup = function(e) {
-        var c = ccanvas.getContext('2d');
+        var c    = ccanvas.getContext('2d');
+        var rect = ccanvas.getBoundingClientRect();
         c.clearRect(0, 0, ccanvas.width, ccanvas.height);
         m_down = false;
-        xcurr  = e.clientX - this.offsetLeft;
-        ycurr  = e.clientY - this.offsetTop;
+        xcurr  = e.clientX - rect.left;
+        ycurr  = e.clientY - rect.top;
 
         var dx = Math.abs(xcurr - xanchor);
         var dy = Math.abs(ycurr - yanchor);
         if (dy > dx) dx = dy;
 
         if (dx > 10) {
-            var newxcen = ((xanchor + dx/2 - ximlen/2) / ximlen) * zoom;
-            var newycen = ((yanchor + dx/2 - yimlen/2) / yimlen) * zoom;
+            var midX = (xanchor + xcurr) / 2;
+            var midY = (yanchor + ycurr) / 2;
+            var newxcen = ((midX - ximlen/2) / ximlen) * zoom;
+            var newycen = ((midY - yimlen/2) / yimlen) * zoom;
             xcen = xcen - newxcen;
             ycen = ycen - newycen;
             zoom = (dx / ximlen) * zoom;
@@ -884,30 +897,30 @@ function main() {
         }
     };
 
+    $('presetSelect').onchange = function() {
+        const idx = parseInt(this.value, 10);
+        if (isNaN(idx)) {
+            loadDefault();
+            setConstants();
+            selectedPreset = "";
+            reset = 1;
+            clearScreenAndReset();
+            return;
+        }
+        const preset = FLAME_PRESETS[idx];
+        zoom = preset.zoom;
+        xcen = preset.xcen;
+        ycen = preset.ycen;
+        parseFormula(preset.formula);
+        setConstants();
+        reset = 1;
+        selectedPreset = idx;
+    };
+
     // Start rendering
-    t1      = (new Date()).getTime();
+    t1      = Date.now();
     running = true;
     render();
 }
 
 main();
-
-
-// portals
-/*
-0.31 0 30
-1 0.1 0.1 1 0.1 0.1 
-0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
-0 0 0 0 0 0 0.2 0 0.19 
-|
-5.1 0.4 0
-0.452548 -0.452548 0.452548 0.452548 0.19 0.1 
-0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
--0.1 0 0 0 0 0 0.9 0 0 
-|
-5.8 0.1 255
-1 0 0 1 0 0 
-0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
-0 0 0 0 0 0 0.5 0 0 
-|
-*/

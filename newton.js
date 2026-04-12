@@ -1,8 +1,8 @@
 /*
- * The Mandelbrot Set, in HTML5 canvas and javascript.
- * https://github.com/cslarsen/mandelbrot-js
+ * Newton's Method fractal, in HTML5 canvas and javascript.
+ * https://github.com/rsweny/mandelbrot-js
  *
- * Copyright (C) 2012 Christian Stigen Larsen
+ * Copyright (C) 2018 Ryan Sweny
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.  You may obtain
@@ -16,10 +16,6 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- */
-
-/*
- * Global variables:
  */
 
 //constants
@@ -731,6 +727,16 @@ function main()
 		draw(getSamples());
 	}
 
+	$("contrastSlider").onchange = function() {
+		contrast = $("contrastSlider").value / 100.0;
+		draw(getSamples());
+	}
+
+	$("colorSlider").onchange = function() {
+		initialColor = $("colorSlider").value / 100.0;
+		draw(getSamples());
+	}
+
 	if ( dragToZoom == true ) {
 		var box = null;
 
@@ -809,10 +815,6 @@ function main()
 				y = yRange[0] + y*dy;
 
 				lookAt = [x, y];
-
-				/*
-				 * This whole code is such a mess ...
-				 */
 
 				var xf = Math.abs(Math.abs(box[0]-box[2])/canvas.width);
 				var yf = Math.abs(Math.abs(box[1]-box[3])/canvas.height);

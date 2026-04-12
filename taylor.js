@@ -1,12 +1,11 @@
 /*
  * Taylor Series Fractal, in HTML5 canvas and javascript.
  * Ported from Taylor.java by Ryan Sweny
+ * https://github.com/rsweny/mandelbrot-js
  *
  * Algorithm reference: http://fractorama.com/doc/taylor.html
  *
- * Rendering approach: accumulation / histogram over multiple passes,
- * with progressive refinement (coarse quad blocks first, then full res,
- * then random anti-aliasing passes).
+ * Rendering approach: accumulation / histogram over multiple passes.
  */
 
 // ---------------------------------------------------------------------------
@@ -94,8 +93,8 @@ var zoom         = 9;
 var xcen         = 0.0;
 var ycen         = 0.01;
 var depth        = 20;
-var glow         = 0.01;
-var brightness   = 1.0;
+var glow         = 0.015;
+var brightness   = 1.2;
 var complexScale = 0;
 var cx = 0, cy = 0;
 var scalePoint    = false;
@@ -376,10 +375,13 @@ function nextPoints() {
 // ---------------------------------------------------------------------------
 
 function renderFrame() {
-  nextPoints();
+  var batchStart = Date.now();
+  do {
+    nextPoints();
+  } while (Date.now() - batchStart < 50);
 
   var now = Date.now();
-  if (now - lastUpdateTime > 200) {
+  if (now - lastUpdateTime > 500) {
     ctx.putImageData(imageData, 0, 0);
     lastUpdateTime = now;
   }

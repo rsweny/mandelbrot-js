@@ -1,6 +1,7 @@
 /*
- * Newtonbrot Fractal, in HTML5 canvas and javascript.
+ * Newton's Method accumulation fractal, in HTML5 canvas and javascript.
  * Ported from Newtonbrot.java by Ryan Sweny
+ * https://github.com/rsweny/mandelbrot-js
  *
  * Newton's method applied to complex polynomial functions.
  * Buddhabrot-style rendering: orbits traced through the plane,
@@ -88,12 +89,12 @@ function buildPalettes() {
       var t = i / 255.0;
       var h, s, v;
       switch (p % 6) {
-        case 0: h = t;                 s = 0.90; v = 0.5 + 0.5*t;  break; // rainbow
-        case 1: h = 0.55 + 0.45*t;    s = 1.00; v = 0.4 + 0.6*t;  break; // blue→red
-        case 2: h = 0.10*t;            s = 1.00; v = 0.3 + 0.7*t;  break; // fire
-        case 3: h = 0.48 + 0.22*t;    s = 0.80; v = 0.3 + 0.7*Math.sin(t*Math.PI); break; // ocean
-        case 4: h = 0.25 + 0.50*t;    s = 0.80; v = 0.70;          break; // green-blue
-        default:h = 0.85 + 0.20*t;    s = 1.00; v = 0.5 + 0.5*t;  break; // pink-purple
+        case 0: h = t;                s = 0.90; v = 0.5 + 0.5*t;  break; // rainbow
+        case 1: h = 0.55 + 0.45*t;    s = 1.00; v = 0.4 + 0.6*t;  break;
+        case 2: h = 0.10*t;           s = 1.00; v = 0.3 + 0.7*t;  break;
+        case 3: h = 0.48 + 0.22*t;    s = 0.80; v = 0.3 + 0.7*Math.sin(t*Math.PI); break;
+        case 4: h = 0.25 + 0.50*t;    s = 0.80; v = 0.70;          break;
+        default:h = 0.85 + 0.20*t;    s = 1.00; v = 0.5 + 0.5*t;  break;
       }
       if (p >= 6) h = (h + 0.5) % 1.0; // complementary second set
       pal.push(hsvToRgb(h, s, v));
@@ -126,7 +127,7 @@ var order         = 4.9242613;
 var imgOrder      = 0.4841751596941611;
 var complexError  = 1.0;
 var gradient      = 0.11;
-var brightness    = 2.0;
+var brightness    = 3.0;
 var depthRed      = 200;
 var depthGreen    = 140;
 var depthBlue     = 40;
@@ -328,14 +329,14 @@ function newtonStep(z, aa, bb) {
       var eighteen = new Complex(18, 0);
       var fifteen  = new Complex(15, 0);
       var f  = z.cpow(exp)
-                .sub(three.mul(z.cpow(five)))
-                .add(six.mul(z.cpow(three)))
-                .sub(three.mul(z))
-                .add(three);
+        .sub(three.mul(z.cpow(five)))
+        .add(six.mul(z.cpow(three)))
+        .sub(three.mul(z))
+        .add(three);
       var df = exp.mul(z.cpow(expM1))
-                .sub(fifteen.mul(z.cpow(four)))
-                .add(eighteen.mul(z.cpow(new Complex(2,0))))
-                .sub(three);
+        .sub(fifteen.mul(z.cpow(four)))
+        .add(eighteen.mul(z.cpow(new Complex(2,0))))
+        .sub(three);
       return z.sub(f.div(df));
     }
   }
@@ -543,8 +544,9 @@ function updateScore(counter, channel, pointIdx) {
     smartX[channel][pointIdx] = Math.random();
     smartY[channel][pointIdx] = Math.random();
     // push this weak index onto the replace buffer
-    for (var k = replacePoint[channel].length-1; k > 0; k--)
+    for (var k = replacePoint[channel].length-1; k > 0; k--) {
       replacePoint[channel][k] = replacePoint[channel][k-1];
+    }
     replacePoint[channel][0] = pointIdx;
   }
 }
@@ -602,8 +604,8 @@ function nextPoints() {
         var baseColor = Math.floor(solColor) | 0;
         var frac = solColor - baseColor;
         var pal = palettes[palIndex % palettes.length];
-        var c0 = pal[Math.min(baseColor, 254)];
-        var c1 = pal[Math.min(baseColor+1, 254)];
+        var c0 = pal[baseColor] ?? pal[254];
+        var c1 = pal[baseColor+1] ?? pal[0];
         var amtR = ((1-frac)*c0[0] + frac*c1[0]) | 0;
         var amtG = ((1-frac)*c0[1] + frac*c1[1]) | 0;
         var amtB = ((1-frac)*c0[2] + frac*c1[2]) | 0;
@@ -679,7 +681,7 @@ function ensureBlack() {
     imgBlue[idx]  /= 1.01;
     imgAlpha[idx] /= 1.01;
   }
-  quadSize   = Math.max(0, quadSize - 2);
+  quadSize = Math.max(0, quadSize - 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -790,7 +792,7 @@ function resetAndDraw() {
   imgOrder     = 0.4841751596941611;
   complexError = 1.0;
   gradient     = 0.11;
-  brightness   = 2.0;
+  brightness   = 3.0;
   depthRed     = 200;
   depthGreen   = 140;
   depthBlue    = 40;
@@ -833,12 +835,6 @@ function setupMouse() {
       algMode = (algMode + 1) % 6;
       $('algMode').value = algMode;
       draw(true);
-      return;
-    }
-    if (e.button === 0 && e.ctrlKey) {
-      byStructure = !byStructure;
-      $('byStructure').checked = byStructure;
-      draw(false);
       return;
     }
     if (e.button === 0 && e.shiftKey) {
@@ -900,18 +896,18 @@ function main() {
   $('resetButton').onclick = resetAndDraw;
 
   $('viewPNG').onclick = function() {
-    var link = document.createElement('a');
+    const link = document.createElement('a');
     link.download = 'newtonbrot.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
   };
 
   // Re-render on any control change
-  var redrawWithRoots  = ['order','imgOrder','complexError','algMode'];
-  var redrawNoRoots    = ['zoom','xcen','ycen','numPoints','palIndex'];
-  var toggleWithRoots  = ['mandelbrotAdd'];
-  var toggleNoRoots    = ['doInverse','byStructure'];
-  var noReset = ['depthRed','depthGreen','depthBlue'];
+  const redrawWithRoots  = ['order','imgOrder','complexError','algMode'];
+  const redrawNoRoots    = ['zoom','xcen','ycen','numPoints','palIndex'];
+  const toggleWithRoots  = ['mandelbrotAdd'];
+  const toggleNoRoots    = ['doInverse','byStructure'];
+  const noReset = ['depthRed','depthGreen','depthBlue'];
 
   redrawWithRoots.forEach(function(id) { $(id).onchange = function() { draw(true); }; });
   redrawNoRoots.forEach(function(id)   { $(id).onchange = function() { draw(false); }; });

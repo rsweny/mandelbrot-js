@@ -67,6 +67,16 @@
         border-color: #444;
       }
 
+      #description input[type="number"]::-webkit-inner-spin-button,
+      #description input[type="number"]::-webkit-outer-spin-button {
+        appearance: none;
+        margin: 0;
+      }
+
+      #description input[type="number"] {
+        appearance: textfield;
+      }
+
       #description select {
         border: #444 1px solid;
         color: #ccc;
@@ -151,11 +161,7 @@
 
           <tr>
             <td>Render time</td>
-            <td><span id="renderTime">0.0</span></td>
-          </tr>
-          <tr>
-            <td>Speed</td>
-            <td><span id="renderSpeed">0</span></td>
+            <td><span id="renderTime">0.0</span>&nbsp;<span id="renderSpeed">0</span></td>
           </tr>
 
           <tr><td colspan="2"><hr/></td></tr>
@@ -245,7 +251,17 @@
           </tr>
 
           <tr><td colspan="2"><hr/></td></tr>
-          <tr><td colspan="2" class="sectionHeader">Formula (density sym color c-matrix v)</td></tr>
+          <tr><td colspan="2" class="sectionHeader">Preset</td></tr>
+          <tr>
+            <td colspan="2">
+              <select id="presetSelect" style="width:100%">
+                <option value="">-- Select Preset --</option>
+              </select>
+            </td>
+          </tr>
+
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader" title="Variants: Linear, Sinusoidal, Spherical, Swirl, Horseshoe, Polar, Handkerchief, Heart, Disc, Spiral, Hyperbolic, Diamond, Ex, Julia, Bent, Waves, Fisheye, Popcorn, Z Translate, Z Scale, Blur 3d, Z Blur, Z Cone, Bubble, Julia 3d, Curl 3d, Pre-blur">Formula (density sym color c-matrix variants)</td></tr>
           <tr>
             <td colspan="2">
               <textarea id="formulaInput" rows="8"></textarea>
@@ -296,6 +312,7 @@
     </div>
 
     <script type="text/javascript" src="palettes.js"></script>
+    <script type="text/javascript" src="flame-presets.js"></script>
     <script type="text/javascript" src="flame.js"></script>
 
   </body>

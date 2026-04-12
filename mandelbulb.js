@@ -2,7 +2,7 @@
  * The Mandelbulb, in HTML5 canvas and javascript.
  * https://github.com/rsweny/mandelbrot-js
  *
- * Copyright (C) 2018 Ryan Swney
+ * Copyright (C) 2018 Ryan Sweny
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.  You may obtain
@@ -18,84 +18,15 @@
  *
  */
 
- // geyser27.ppm 
-var pallet =
-[
- [100, 0, 0], [26, 5, 5], [77, 17, 6], [98, 45, 29],
- [124, 78, 66], [114, 129, 146], [115, 168, 193], [132, 179, 210],
- [152, 186, 220], [153, 176, 202], [142, 171, 181], [157, 169, 176],
- [165, 162, 158], [154, 131, 103], [149, 104, 73], [152, 98, 60],
- [140, 85, 46], [138, 67, 23], [163, 57, 6], [173, 55, 8],
- [179, 56, 3], [190, 61, 8], [208, 86, 7], [210, 110, 25],
- [221, 127, 29], [222, 150, 44], [226, 161, 53], [222, 159, 52],
- [222, 152, 60], [213, 148, 66], [193, 134, 70], [164, 146, 113],
- [138, 141, 159], [133, 144, 165], [154, 139, 122], [148, 108, 84],
- [158, 115, 69], [189, 121, 57], [198, 124, 48], [212, 136, 45],
- [224, 146, 39], [223, 143, 35], [222, 137, 31], [222, 136, 24],
- [221, 137, 18], [205, 101, 19], [198, 76, 4], [176, 60, 14],
- [148, 86, 43], [154, 110, 61], [141, 115, 89], [125, 168, 156],
- [126, 173, 199], [109, 156, 212], [105, 144, 195], [96, 120, 161],
- [71, 74, 121], [37, 58, 125], [26, 49, 119], [16, 42, 117],
- [17, 41, 115], [18, 38, 106], [35, 42, 95], [53, 36, 45],
- [59, 35, 35], [84, 25, 14], [98, 35, 15], [116, 48, 18],
- [121, 56, 23], [135, 72, 28], [142, 82, 36], [163, 103, 51],
- [178, 108, 56], [196, 123, 61], [214, 145, 68], [202, 165, 99],
- [182, 166, 149], [177, 174, 165], [175, 176, 165], [157, 168, 171],
- [135, 153, 167], [120, 125, 129], [126, 87, 69], [125, 82, 64],
- [126, 81, 63], [127, 75, 46], [137, 83, 37], [142, 82, 36],
- [142, 80, 35], [134, 70, 20], [116, 51, 9], [107, 38, 11],
- [97, 29, 7], [86, 25, 13], [87, 26, 8], [93, 28, 8],
- [103, 31, 6], [110, 40, 6], [111, 43, 7], [141, 28, 8],
- [143, 31, 7], [145, 34, 10], [148, 36, 6], [145, 39, 3],
- [128, 54, 22], [115, 51, 25], [99, 50, 25], [99, 47, 28],
- [102, 44, 27], [95, 42, 26], [53, 35, 43], [23, 38, 100],
- [14, 34, 103], [18, 28, 89], [18, 28, 89], [18, 28, 89],
- [34, 13, 12], [75, 15, 6], [85, 15, 2], [98, 23, 4],
- [101, 24, 2], [105, 32, 2], [106, 34, 2], [104, 37, 12],
- [100, 33, 14], [91, 30, 11], [88, 29, 11], [93, 38, 18],
- [96, 39, 24], [98, 47, 30], [69, 63, 76], [36, 54, 121],
- [49, 63, 118], [100, 68, 69], [114, 71, 55], [131, 86, 57],
- [159, 109, 61], [186, 112, 45], [200, 123, 46], [217, 143, 50],
- [221, 149, 55], [221, 147, 50], [211, 139, 54], [188, 119, 49],
- [175, 103, 38], [152, 85, 32], [165, 61, 23], [160, 43, 7],
- [163, 41, 6], [153, 31, 3], [156, 35, 7], [162, 41, 7],
- [164, 43, 5], [170, 53, 9], [182, 67, 12], [195, 110, 40],
- [213, 134, 48], [224, 152, 58], [223, 161, 67], [222, 154, 64],
- [195, 134, 61], [181, 119, 60], [156, 111, 61], [145, 104, 74],
- [126, 81, 65], [91, 91, 112], [114, 123, 157], [118, 163, 183],
- [127, 182, 196], [128, 186, 211], [132, 187, 192], [154, 193, 164],
- [167, 204, 164], [170, 202, 163], [180, 203, 188], [163, 198, 225],
- [139, 193, 222], [136, 192, 219], [119, 177, 225], [115, 173, 225],
- [112, 166, 225], [109, 154, 202], [113, 118, 144], [119, 77, 72],
- [112, 67, 52], [102, 53, 32], [102, 53, 33], [111, 67, 54],
- [90, 85, 91], [44, 63, 127], [32, 52, 121], [26, 46, 119],
- [18, 38, 109], [16, 31, 95], [16, 31, 95], [16, 31, 95],
- [16, 31, 95], [23, 21, 51], [33, 11, 21], [46, 37, 52],
- [55, 66, 120], [98, 107, 144], [133, 149, 176], [137, 158, 190],
- [121, 132, 164], [76, 86, 128], [40, 58, 125], [30, 50, 118],
- [27, 47, 121], [39, 50, 109], [107, 61, 46], [104, 57, 36],
- [110, 60, 40], [130, 82, 55], [153, 108, 60], [155, 114, 66],
- [186, 132, 68], [216, 177, 98], [221, 182, 114], [220, 213, 126],
- [223, 205, 147], [194, 197, 178], [174, 198, 177], [183, 184, 159],
- [192, 145, 102], [178, 111, 64], [170, 81, 28], [173, 58, 7],
- [173, 52, 7], [173, 50, 5], [167, 48, 2], [160, 47, 3],
- [158, 48, 2], [163, 51, 6], [174, 58, 8], [189, 97, 22],
- [209, 124, 41], [219, 144, 52], [219, 148, 62], [200, 138, 62],
- [187, 134, 72], [171, 156, 133], [167, 172, 160], [138, 150, 173],
- [126, 139, 157], [142, 106, 81], [117, 71, 55], [108, 50, 28],
- [98, 42, 18], [89, 28, 10], [81, 23, 6], [78, 14, 2],
- [78, 14, 1], [88, 14, 1], [98, 14, 1], [108, 14, 1],
-];
+var pallet = palettes["Geyser"];
+var mode = 0;
 
- var mode = 0;
-
-
-//detail level
+// detail level
 var rayDetail = 0.003;
 var stepDetail = 0.028;
 var frost = 1.0;
 
-//ray traced lighting
+// ray traced lighting
 var LightVector = [ 0.12, 0.15, -0.19 ];
 var AMBIENT_LIGHT = 8.0;
 var RAY_STEPS = 25;
@@ -104,23 +35,24 @@ var primary_light = 28.0;
 var shadow_darkness = 30.0;
 var HORIZON = 20;
 
-//fog based on path traces
-var fog_factor = 0.94;
+// fog based on path traces
+var fog_factor = 0.01;
+var fog_color = {r: 250, g: 250, b: 250};
 var min_y, max_y;
 
-//formula variation
+// formula variation
 var formula = 0;
-var inverse_azimuth = 1;
+var azimuth = 1;
 
-//settings that need saving
+// settings that need saving
 var depth = 20;
 var ximlen = 0;
 var yimlen = 0;
 var pal = 1;
 var power = 8;
-var gradient = 0.6;
-var brightness = 1.5;
-var zoom = 2.4;
+var gradient = 0.5;
+var brightness = 1.8;
+var zoom = 3.0;
 var xcen = 0.0;
 var ycen = 0.0;
 var cameraPersp = -0.1;
@@ -132,7 +64,7 @@ var focus_depth = 1.0;
 var opacity = 1.4;
 var focus = -0.15; //higher values for further distance in focus.
 
-//data
+// data
 var root_zoom;
 var half_ximlen, half_yimlen;
 var occlusionPositions = null;
@@ -149,45 +81,31 @@ var IrotZ;
 var rotX;
 var rotZ;
 
-
-//mouse
+// mouse
 var xcurr,ycurr,xanchor,yanchor;
 var m_down;
 var drawFocus = false;
 
-
-//Stats
+// stats
 var t1 = 0;
 var visiblePixels, allPixels, rayPoints;
 var renderpass = 0;
 var max_alpha = 1;
 
-
-/*
- * Initialize canvas
- */
+// initialize canvas
 var canvas = $('canvasMandelbrot');
 canvas.width  = 1200;
 canvas.height = 1200;
-//
 var ccanvas = $('canvasControls');
 ccanvas.width  = 1200;
 ccanvas.height = 1200;
-//
 var ctx = canvas.getContext('2d');
 var ctx_img = ctx.createImageData(canvas.width, canvas.height);
 
-/*
- * Just a shorthand function: Fetch given element, jQuery-style
- */
-function $(id)
-{
-	return document.getElementById(id);
-}
+// JQuery shorthand
+function $(id) { return document.getElementById(id) }
 
-
-function matrix(rows, cols, defaultValue)
-{
+function matrix(rows, cols, defaultValue) {
 	var arr = [];
 	for(var i = 0; i < rows; i++) {
 		arr.push([]);
@@ -200,7 +118,6 @@ function matrix(rows, cols, defaultValue)
 	return arr;
 }
 	
-
 function updateMinMaxY()
 {
 	console.log("updateMinMaxY()");
@@ -224,7 +141,6 @@ function updateMinMaxY()
 	console.log(focus_depth + " Y Bounds: " + min_y + " to " + max_y);
 }
 	
-
 function findPeak(arr)
 {
 	var max = 0;
@@ -273,9 +189,6 @@ function gridpoints(yRow)
 	
 	var z2 = (yRow / yimlen - 0.5 + jitter1) * zoom - ycen;
 	var red, green, blue;
-
-	//console.log(root_zoom + " step1: " + stepAmount);
-	
 	for (var x = 0; x < ximlen; x++)
 	{
 		//convert screen to fractal coordinates
@@ -287,8 +200,6 @@ function gridpoints(yRow)
 		//main loop for y values (depth)
 		for (var y = min_y; y < max_y; y += stepAmount)
 		{
-
-			
 			allPixels++;
 	
 			//rotate coordinate system from screen to fractal coordinates
@@ -298,20 +209,17 @@ function gridpoints(yRow)
 			var point3D = [0,0,0,0,0];
 			rotateVector(point3D, CameraMatrix, fractal_x, y, fractal_z);
 
-			
 			//do the calculation
 			insideFractal(point3D, trace_history);
 			var iter = point3D[3];
 			var color = point3D[4];
 
 			//if (allPixels%1000 == 0) console.log("checking " + point3D[0] + " " + point3D[1] + " " + point3D[2] + " " + point3D[3]);
-			
 
 			if (iter == depth)
 			{
-				//console.log("inside for " + fractal_x + " " + y + " " + fractal_z);
 				//plot pixel
-				var goodPoints = []; //java Vector
+				var goodPoints = [];
 				var rndFuzzy = Math.max(opacity*Math.random(), 0.4);
 				var light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
 				plotPixel(x, yRow, y, color, light_factor);
@@ -344,20 +252,17 @@ function gridpoints(yRow)
 				//plot additional points found from ray tracing
 				if (frost > 0.9)
 				{
-					for (var i = 0; i < goodPoints.length; i++)
+					for (let i = 0; i < goodPoints.length; i++)
 					{
-						var traced_point = goodPoints[i]; //double[]
+						const traced_point = goodPoints[i]; //double[]
 						color = traced_point[4];
 						light_factor = 1.0 + calculateRays(traced_point, rndFuzzy, null);
-						var screen_point = reversePoint(traced_point);
+						const screen_point = reversePoint(traced_point);
 						
 						//if the ray point is not occluded, draw it
-						var tempx = Math.floor(screen_point[0]);
-						var tempy = Math.floor(screen_point[2]);
-						
-						if ( tempx >= 0 && tempy >= 0 && tempx < ximlen && tempy < yimlen && screen_point[1] < occlusionPositions[tempx][tempy])
-						{
-							//plot the ray pixel
+						const tempx = Math.floor(screen_point[0]);
+						const tempy = Math.floor(screen_point[2]);
+						if ( tempx >= 0 && tempy >= 0 && tempx < ximlen && tempy < yimlen && screen_point[1] < occlusionPositions[tempx][tempy]) {
 							plotPixel(tempx, tempy, screen_point[1], color, light_factor);
 							rayPoints++;
 						}
@@ -371,23 +276,18 @@ function gridpoints(yRow)
 				var rnd = Math.random();
 				stepAmount = (stepDetail + rnd*stepDetail) * ((depth/iter) / depth) * root_zoom * 0.5;
 				
-				var plot_start = 1;
-				if (cameraPersp > 0) plot_start = 4;
-				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start)
-				{
-					green = 250;
-					blue = 90 + iter*2;
-					red = 20 + iter;
-					
-					for (var c = 0; c < iter; c++)
-					{
+				const plot_start = 1;
+				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start) {
+					red = fog_color.r;
+					green = fog_color.g;
+					blue = fog_color.b;
+					for (var c = 0; c < iter; c++) {
 						plotFogPixel(trace_history[c], fog_factor, red, green, blue);
 					}
 				}
 			}
 		}
 	}
-	//console.log(root_zoom + " step2: " + stepAmount);
 }
 	
 function plotPixel(x, yRow, depth, color, light_factor)
@@ -463,7 +363,7 @@ function insideFractal(data, trace_history)
 			phi_cos = Math.cos(phi*power);
 			x = r_power * Math.cos(theta_power) * phi_cos + data[0];
 			y = r_power * Math.sin(theta_power) * phi_cos + data[1];
-			z = r_power * Math.sin(phi*power)*inverse_azimuth + data[2];
+			z = r_power * Math.sin(phi*power)*azimuth + data[2];
 			pixelColor = phi / 3.0;
 		}
 		else if (formula == 1)
@@ -473,7 +373,7 @@ function insideFractal(data, trace_history)
 			phi_sin = Math.sin(phi*power);
 			x = r_power * Math.cos(theta_power) * phi_sin + data[0];
 			y = r_power * Math.sin(theta_power) * phi_sin + data[1];
-			z = r_power * Math.cos(phi*power)*inverse_azimuth + data[2];
+			z = r_power * Math.cos(phi*power)*azimuth + data[2];
 			pixelColor = phi / 3.0;
 		}
 
@@ -495,7 +395,6 @@ function insideFractal(data, trace_history)
 	data[4] = pixelColor;
 }
 	
-
 function calculateRays(origPoint, rndFuzzy, goodPoints)
 {
 	var light_factor = 1.0;
@@ -594,15 +493,11 @@ function plotFogPixel(origPoint, factor, r, g, b)
 	var tempx = Math.floor(screenPoint[0]);
 	var tempy =  Math.floor(screenPoint[2]);
 	var depth = screenPoint[1];
-	
-
-	if (tempx >= 0 && tempy >=0 && tempx < ximlen && tempy < yimlen)
-	{
+	if (tempx >= 0 && tempy >=0 && tempx < ximlen && tempy < yimlen) {
 		//solid occludes glow
 		if (depth > occlusionPositions[tempx][tempy]) return;
 	
-		if (cameraDOF > 0)
-		{
+		if (cameraDOF > 0) {
 			var blur_factor = focus-depth;
 			blur(screenPoint, blur_factor);
 			tempx = Math.floor(screenPoint[0]);
@@ -638,9 +533,6 @@ function reversePoint(fracPoint)
 	return point3D;
 }
 	
-
-
-	
 function setCamera()
 {
 	// 3D camera precalc
@@ -648,7 +540,6 @@ function setCamera()
 	rotX = RotateX(cameraPitch);
 	rotZ = RotateZ(cameraYaw);
 	CameraMatrix = matrixMult(rotZ, rotX);
-
 	IrotX = RotateX(-cameraPitch);
 	IrotZ = RotateZ(-cameraYaw);
 }
@@ -679,7 +570,6 @@ function RotateY(angle)
 	return rot;
 }
 	
-	
 function RotateZ(angle)
 {
 	var rot = matrix(3,3,0.0);
@@ -708,12 +598,7 @@ function matrixMult(m, matrixArr)
 	return result;
 }
 
-
-
-
-
 /* Matrix Ops */
-
 function determinant(mat) 
 {
 	var result = 0;
@@ -787,226 +672,12 @@ function constMul(d, m)
 	m[2][2] *= d;
 }
 
-	
-	
-	
 function setZoom(z)
 {
 	zoom = z;
-	
 	root_zoom = Math.pow(zoom, 0.5);
-
-	//ray tracing
 	ray_step = rayDetail*zoom;
 }
-	
-/*
-
-	public void keyReleased(KeyEvent e)
-	{
-		char c = e.getKeyChar();
-		int keyCode = (int)c;
-		
-		//22: ctrl-v
-		//8: backspace
-		if (keyCode == 22 || keyCode == 8 || c == ' ' || c == '-' || c == '|' || c == '.' || (c >= '0' && c <= '9') )
-		{
-		
-			if (e.getSource() != txtGradient && e.getSource() != txtBrightness && e.getSource() != txtFocus && e.getSource() != txtDOF && e.getSource() != txtFog && e.getSource() != txtLight && e.getSource() != txtZRes && e.getSource() != txtOpacity && e.getSource() != txtZPos) 
-				reset = 1;
-			else
-				reset = 2;
-	
-			getConstants();
-		}
-	}
-	
-	public void keyTyped(KeyEvent e)
-	{
-		char c = e.getKeyChar();
-		int keyCode = (int)c;
-		
-		//draw focus border for DOF
-		if ( c == 'f')
-		{
-			drawFocus = !drawFocus;
-			reset = 2;
-			e.consume();
-		}
-	}
-	
-	public void actionPerformed(ActionEvent e)
-	{
-		m_down = true;
-		try
-		{
-			if (e.getSource() == saveFractal)
-			{
-				String filename = saveFile("Save Fractal", null, "mandelbrot3d_" + ximlen + "x" + yimlen + ".fractal");
-				writeFractalData(filename);
-			}
-			else if (e.getSource() == openFractal)
-			{
-				String filename = loadFile("Open Fractal", null, ".fractal");
-				readFractalData(filename);
-			}
-			else
-			{
-				String filename = saveFile("Export PNG", null, ".png");
-				writePNG(filename);
-			}
-		}
-		catch(Exception ex)
-		{
-		}
-		m_down = false;
-	}
-	
-	
-	public String loadFile(String title, String defDir, String fileType) throws Exception
-	{
-		Frame parent = new Frame();
-		FileDialog fd = new FileDialog(parent, title, FileDialog.LOAD);
-		fd.setFile(fileType);
-		fd.setDirectory(defDir);
-		fd.setLocation(50, 50);
-		fd.show();
-		lastDir = fd.getDirectory();
-		if (lastDir == null) throw new Exception();
-		return lastDir + fd.getFile();
-	}
-
-	public String saveFile(String title, String defDir, String fileType) throws Exception
-	{
-		Frame parent = new Frame();
-		FileDialog fd = new FileDialog(parent, title, FileDialog.SAVE);
-		fd.setFile(fileType);
-		fd.setDirectory(defDir);
-		fd.setLocation(50, 50);
-		fd.show();
-		lastDir = fd.getDirectory();
-		if (lastDir == null) throw new Exception();
-		return lastDir + fd.getFile();
-	} 
-	
-	public void writePNG(String filename)
-	{
-		try 
-		{
-			BufferedImage bi = new BufferedImage(ximlen, yimlen, BufferedImage.TYPE_INT_ARGB); 
-			bi.setRGB(0, 0, ximlen, yimlen, pixels, 0, ximlen);
-			File outputfile = new File(filename);
-			ImageIO.write(bi, "png", outputfile);
-			System.out.println("Export PNG success: " + outputfile.getAbsolutePath());
-			showStatus("Export PNG success: " + outputfile.getAbsolutePath() );
-		} 
-		catch (Exception e) 
-		{
-			System.out.println("export: " + e.toString());
-		}
-	}
-	
-	public void writeFractalData(String filename)
-	{
-		try 
-		{
-			FileOutputStream fos = new FileOutputStream(filename);
-			ObjectOutputStream oos = new ObjectOutputStream(fos);
-
-			oos.writeObject(img_alpha);
-			oos.writeObject(img_red);
-			oos.writeObject(img_green);
-			oos.writeObject(img_blue);
-			
-			//write int pref array
-			int[] intPrefs = { depth, ximlen, yimlen, pal, inverse_azimuth, formula };
-			oos.writeObject(intPrefs);
-			
-			//write double pref array
-			double[] doublePrefs = { power, gradient, brightness, zoom, xcen, ycen, cameraPersp, stepDetail, cameraYaw, cameraPitch, cameraDOF, opacity, focus, frost, fog_factor, primary_light };
-			oos.writeObject(doublePrefs);
-			
-			oos.flush();
-			fos.close();
-			System.out.println("write Fractal Data success: " + filename);
-			showStatus("write Fractal Data success: " + filename);
-		}
-		catch (Throwable e) 
-		{
-			System.out.println("write: " + e.toString());
-		} 
-	}
-	
-	public void readFractalData(String filename)
-	{
-		try 
-		{
-			FileInputStream fis = new FileInputStream(filename);
-			ObjectInputStream ois = new ObjectInputStream(fis);
-
-			img_alpha = (float[][])ois.readObject();
-			img_red = (float[][])ois.readObject();
-			img_green = (float[][])ois.readObject();
-			img_blue = (float[][])ois.readObject();
-
-			//read int pref array
-			int[] intPrefs = (int[])ois.readObject();
-			depth = intPrefs[0];
-			pal = intPrefs[3];
-			
-			
-			//read double pref array
-			double[] doublePrefs = (double[])ois.readObject();
-			power = doublePrefs[0];
-			gradient = doublePrefs[1];
-			brightness = doublePrefs[2];
-			setZoom( doublePrefs[3] );
-			xcen = doublePrefs[4];
-			ycen = doublePrefs[5];
-			cameraPersp = doublePrefs[6];
-			stepDetail = doublePrefs[7];
-			cameraYaw = doublePrefs[8];
-			cameraPitch = doublePrefs[9];
-			cameraDOF = doublePrefs[10];
-			opacity = doublePrefs[11];
-			focus = doublePrefs[12];
-			frost = doublePrefs[13];
-			
-			try
-			{
-				inverse_azimuth= intPrefs[4];
-				fog_factor = doublePrefs[14];
-				primary_light = doublePrefs[15];
-				formula = intPrefs[5];
-			}
-			catch(Exception e)
-			{
-			}
-			
-			
-			fis.close();
-			
-			
-			if (yimlen != img_alpha[0].length)
-			{
-				initVars(true);
-			}
-			else
-			{
-				ximlen = intPrefs[1];
-				yimlen = intPrefs[2];
-				initVars(false);
-			}
-			System.out.println("open success! " + filename);
-		}
-		catch (Throwable e) 
-		{
-			System.out.println("read: " + e.toString());
-		} 
-	}
-
-	*/
-	
 	
 function reDraw()
 {
@@ -1021,13 +692,9 @@ function reDraw()
 function draw(startScanning)
 {
 	console.log("--------------------------draw()");
-
 	updateHashTag();
-
 	render(startScanning);
 }
-
-
 
 function render(startScanning)
 {
@@ -1059,12 +726,11 @@ function render(startScanning)
 		
 		if (renderpass % 50 == 0)
 		{
-			var t2 = (new Date()).getTime();
-			var completeness = Math.round(max_alpha*100)/100.0;
-			var strStatus = y + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + renderpass + " max value: " + completeness + " in " + (t2-t1);
+			const t2 = (new Date()).getTime();
+			const completeness = Math.round(max_alpha*100)/100.0;
+			const strStatus = (new Date()).toISOString().substring(0,19) + " " + y + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + renderpass + " max value: " + completeness + " in " + (t2-t1);
 			t1 = (new Date()).getTime();
 			console.log(strStatus);
-			//showStatus(strStatus);
 			updateHistogram();
 
 			//autosave png and last 5 states.
@@ -1078,7 +744,6 @@ function render(startScanning)
 			allPixels = 0;
 			rayPoints = 0;
 		}
-
 
 		var now = (new Date).getTime();
 		if ( (now - lastUpdate) >= 10000) {
@@ -1094,12 +759,11 @@ function render(startScanning)
         }
 
 		// yield control back to browser, so that canvas is updated
-		var sleepTime = 50;
 		if (m_down) sleepTime = 2000;
-		y++;
-		if (y > yimlen-1) y = 0;
-        setTimeout(scanline, sleepTime);
-	}
+			y++;
+			if (y > yimlen-1) y = 0;
+        setTimeout(scanline, 1);
+		}
 
 	if (startScanning) scanline();
 }
@@ -1149,18 +813,13 @@ function updateHistogram()
 	drawFocus = false;
 }
 
-
-
-
-
 /*
  * When resizing the window, be sure to update all the canvas stuff.
  */
-window.onresize = function(event)
+window.onresize = function(_event)
 {
 	reInitCanvas = true;
 };
-
 
 function init()
 {
@@ -1180,50 +839,36 @@ function init()
 	setCamera();
 }
 
-/*
-public boolean mouseDown(Event evt, int x, int y)
-{
-	xanchor = x;
-	yanchor = y;
-
-	if (evt.modifiers == Event.ALT_MASK)
-	{
-		formula  = (formula + 1)%2;
-		if (formula == 0) System.out.println("sin mandelbulb");
-		else if (formula == 1) System.out.println("cos mandelbulb");
-		else System.out.println("symetric mandelbulb");
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.SHIFT_MASK)
-	{
-		pal  = (pal + 1)%(Pallet.fpalette.length);
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.CTRL_MASK)
-	{
-		inverse_azimuth = -inverse_azimuth;
-		System.out.println("inverse azimuth is " + inverse_azimuth);
-		reset = 1;
-	}
-	else if (evt.modifiers == Event.META_MASK)
-	{
-		panelMain.setVisible(!panelMain.isVisible());
-	}
-
-	return true;
-}*/
-
-
 function main()
 {
-
-	$('viewPNG').onclick = function(event)
+	$('viewPNG').onclick = function(_e)
 	{
 		var link = document.createElement('a');
-		link.download = 'mandelbulb.png';
+		link.download = 'mandelbulb-' + renderpass + '-' + completeness + '.png';
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	};
+
+	$("zoomInput").onchange = function() {
+		setZoom(parseFloat($("zoomInput").value));
+		updateHashTag();
+		reset = 1;
+		draw(false);
+	}
+
+	$("xcenInput").onchange = function() {
+		xcen = parseFloat($("xcenInput").value);
+		updateHashTag();
+		reset = 1;
+		draw(false);
+	}
+
+	$("ycenInput").onchange = function() {
+		ycen = parseFloat($("ycenInput").value);
+		updateHashTag();
+		reset = 1;
+		draw(false);
+	}
 
 	$("contrastSlider").onchange = function() {
 		gradient =  $("contrastSlider").value / 100.0; 
@@ -1251,6 +896,13 @@ function main()
 		updateHashTag();
 	}
 
+	$("fogColor").oninput = function() {
+		var hex = $("fogColor").value;
+		fog_color.r = parseInt(hex.slice(1,3), 16);
+		fog_color.g = parseInt(hex.slice(3,5), 16);
+		fog_color.b = parseInt(hex.slice(5,7), 16);
+	}
+
 	$("power").onchange = function() {
 		power = parseFloat($("power").value);
 		updateHashTag();
@@ -1270,9 +922,45 @@ function main()
 		drawFocus = true;
 	}
 
+	$("cameraYaw").onchange = function() {
+		cameraYaw = parseFloat($("cameraYaw").value);
+		updateHashTag();
+		reset = 1;
+		setCamera();
+		draw(false);
+	}
+
+	$("cameraPitch").onchange = function() {
+		cameraPitch = parseFloat($("cameraPitch").value);
+		updateHashTag();
+		reset = 1;
+		setCamera();
+		draw(false);
+	}
+
+	$("colorPalette").onchange = function() {
+		pallet = palettes[$("colorPalette").value];
+		reset = 1;
+	}
+
+	$("formulaSelect").onchange = function() {
+		formula = parseInt($("formulaSelect").value);
+		reset = 1;
+		zoom = 2.9;
+		draw(false);
+	}
+
 	$('canvasControls').onmousedown = function(e)
 	{
 		console.log("mouse down!");
+
+		if (e.ctrlKey)
+		{
+			azimuth = -azimuth;
+			console.log("azimuth is " + azimuth);
+			reset = 1;
+			return;
+		}
 
 		m_down = true;
 
@@ -1286,7 +974,6 @@ function main()
 	{
 		if (m_down)
 		{
-			
 			var c = ccanvas.getContext('2d');
 			c.lineWidth = 1;
 
@@ -1310,16 +997,11 @@ function main()
 	{
 		console.log("mouse up!");
 
-		/*
-		 * Clear entire canvas
-		 */
+		// clear entire canvas
 		var c = ccanvas.getContext('2d');
 		c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
-
-		/*
-		 * Do the zoom and restart render
-		 */
+		// do the zoom and restart render
 		m_down = false;
 		xcurr = e.clientX - this.offsetLeft;
 		ycurr = e.clientY - this.offsetTop;
@@ -1328,7 +1010,7 @@ function main()
 		var dy = Math.abs(ycurr - yanchor);
 		if (dy > dx)  dx = dy;
 		
-	    //make sure zoom isn't too small
+	    // make sure zoom isn't too small
 	   	if (dx > 10)
 	   	{
 			var newxcen = xanchor + dx/2.0;
@@ -1338,19 +1020,22 @@ function main()
 			var newycen = yanchor + dx/2.0;
 			newycen = ((newycen - half_yimlen)/yimlen)*zoom;
 			ycen = ycen - newycen;
-			
+
 			console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
 			setZoom( (dx/ximlen)*zoom );
 			reset = 1;
 			setCamera();
 			draw(false);
 		}
+		else if (e.shiftKey)
+		{
+			console.log("toggle focus planes")
+			drawFocus = !drawFocus;
+			reset = 2;
+		}
 	}
 
-
-	/*
-	 * Read hash tag and render away at page load.
-	 */
+	// read hash tag and render away at page load.
 	readHashTag();
 	setZoom(zoom);
 	init();
@@ -1358,7 +1043,6 @@ function main()
 }
 
 main();
-
 
 
 /*
@@ -1420,6 +1104,23 @@ function readHashTag()
 				console.log("readHashTag() focus : " + focus);
 				break;
 			}
+			case 'yaw': {
+				cameraYaw = parseFloat(val);
+				$("cameraYaw").value = cameraYaw;
+				console.log("readHashTag() yaw : " + cameraYaw);
+				break;
+			}
+			case 'pitch': {
+				cameraPitch = parseFloat(val);
+				$("cameraPitch").value = cameraPitch;
+				console.log("readHashTag() pitch : " + cameraPitch);
+				break;
+			}
+			case 'azimuth': {
+				azimuth = parseFloat(val);
+				console.log("readHashTag() azimuth : " + azimuth);
+				break;
+			}
 		}
 	}
 }
@@ -1431,10 +1132,8 @@ function readHashTag()
 function updateHashTag()
 {
 	console.log("updateHashTag(): " + zoom);
-	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus;
+	$("zoomInput").value = zoom;
+	$("xcenInput").value = xcen;
+	$("ycenInput").value = ycen;
+	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth;
 }
-
-
-
-
-
