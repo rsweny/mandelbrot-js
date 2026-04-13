@@ -45,7 +45,7 @@ var formula = 0;
 var azimuth = 1;
 
 // settings that need saving
-var depth = 20;
+let iterations = 20;
 var ximlen = 0;
 var yimlen = 0;
 var pal = 1;
@@ -94,11 +94,11 @@ var max_alpha = 1;
 
 // initialize canvas
 var canvas = $('canvasMandelbrot');
-canvas.width  = 1200;
-canvas.height = 1200;
+canvas.width  = 1800;
+canvas.height = 1800;
 var ccanvas = $('canvasControls');
-ccanvas.width  = 1200;
-ccanvas.height = 1200;
+ccanvas.width  = 1800;
+ccanvas.height = 1800;
 var ctx = canvas.getContext('2d');
 var ctx_img = ctx.createImageData(canvas.width, canvas.height);
 
@@ -179,10 +179,10 @@ function gridpoints(yRow)
 	var found_limit = Math.ceil(frost);
 	if (min_y == -2.0) found_limit = 0;
 	
-	var trace_history = matrix(depth+1, 5, 0.0);
+	var trace_history = matrix(iterations+1, 5, 0.0);
 
-	var jitter1 = (0.5 - Math.random()) / ximlen;
-	var jitter2 = (0.5 - Math.random()) / yimlen;
+	var jitter1 = ((0.5 - Math.random()) / ximlen)*0.4;
+	var jitter2 = ((0.5 - Math.random()) / yimlen)*0.4;
 	
 	//step amount for surface detection
 	var stepAmount = (stepDetail + Math.random()*stepDetail)*root_zoom;
@@ -216,7 +216,7 @@ function gridpoints(yRow)
 
 			//if (allPixels%1000 == 0) console.log("checking " + point3D[0] + " " + point3D[1] + " " + point3D[2] + " " + point3D[3]);
 
-			if (iter == depth)
+			if (iter == iterations)
 			{
 				//plot pixel
 				var goodPoints = [];
@@ -229,8 +229,7 @@ function gridpoints(yRow)
 				var found = 0;
 				var counter = 0;
 				var newy = y;
-				while (found < found_limit && counter < 200*frost)
-				{
+				while (found < found_limit && counter < 100*frost) {
 					newy = y - stepAmount*Math.random()*2.0;
 					persp = 1.0 + newy * cameraPersp;
 					fractal_x = x2 / persp;
@@ -239,8 +238,7 @@ function gridpoints(yRow)
 					insideFractal(point3D, null);
 					iter = Math.floor(point3D[3]);
 					color = point3D[4];
-					if (iter == depth)
-					{
+					if (iter == iterations) {
 						light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
 						plotPixel(x, yRow, y, color, light_factor);
 						visiblePixels++;
@@ -260,8 +258,8 @@ function gridpoints(yRow)
 						const screen_point = reversePoint(traced_point);
 						
 						//if the ray point is not occluded, draw it
-						const tempx = Math.floor(screen_point[0]);
-						const tempy = Math.floor(screen_point[2]);
+						const tempx = Math.round(screen_point[0]);
+						const tempy = Math.round(screen_point[2]);
 						if ( tempx >= 0 && tempy >= 0 && tempx < ximlen && tempy < yimlen && screen_point[1] < occlusionPositions[tempx][tempy]) {
 							plotPixel(tempx, tempy, screen_point[1], color, light_factor);
 							rayPoints++;
@@ -274,7 +272,7 @@ function gridpoints(yRow)
 			{
 				//increase step accuracy after first pass and near surface
 				var rnd = Math.random();
-				stepAmount = (stepDetail + rnd*stepDetail) * ((depth/iter) / depth) * root_zoom * 0.5;
+				stepAmount = (stepDetail + rnd*stepDetail) * ((iterations/iter) / iterations) * root_zoom * 0.5;
 				
 				const plot_start = 1;
 				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start) {
@@ -389,7 +387,7 @@ function insideFractal(data, trace_history)
 		
 		iter++;
 	}
-	while ( iter < depth && r < 8 );
+	while ( iter < iterations && r < 8 );
 
 	data[3] = iter;
 	data[4] = pixelColor;
@@ -433,7 +431,7 @@ function calculateRay(origPoint, steps,stepx,stepy, stepz, bright, rndFuzzy, goo
 		origPoint[2] += stepz*i;
 		
 		insideFractal( origPoint, null );
-		if ( origPoint[3] == depth )
+		if ( origPoint[3] == iterations )
 		{
 			//ray hit solid, this is in shadow
 			bright = 0.0;
@@ -489,19 +487,19 @@ function plotShadowPixel(tempx, tempy, depth, colorVal, light_factor)
 	
 function plotFogPixel(origPoint, factor, r, g, b)
 {
-	var screenPoint = reversePoint( origPoint );
-	var tempx = Math.floor(screenPoint[0]);
-	var tempy =  Math.floor(screenPoint[2]);
+	var screenPoint = reversePoint(origPoint);
+	var tempx = Math.round(screenPoint[0]);
+	var tempy = Math.round(screenPoint[2]);
 	var depth = screenPoint[1];
 	if (tempx >= 0 && tempy >=0 && tempx < ximlen && tempy < yimlen) {
 		//solid occludes glow
 		if (depth > occlusionPositions[tempx][tempy]) return;
-	
+
 		if (cameraDOF > 0) {
 			var blur_factor = focus-depth;
 			blur(screenPoint, blur_factor);
-			tempx = Math.floor(screenPoint[0]);
-			tempy = Math.floor(screenPoint[2]);
+			tempx = Math.round(screenPoint[0]);
+			tempy = Math.round(screenPoint[2]);
 			if (tempx < 0 || tempy < 0 || tempx > ximlen -1 || tempy > yimlen-1) return;
 		}
 		img_red[tempx][tempy] += (r*factor);
@@ -747,7 +745,6 @@ function render(startScanning)
 
 		var now = (new Date).getTime();
 		if ( (now - lastUpdate) >= 10000) {
-
 			// Update speed and time taken
 			var elapsed = (now - start)/1000.0;
 			var speed = Math.floor(pixels / elapsed);
@@ -759,11 +756,11 @@ function render(startScanning)
         }
 
 		// yield control back to browser, so that canvas is updated
-		if (m_down) sleepTime = 2000;
-			y++;
-			if (y > yimlen-1) y = 0;
-        setTimeout(scanline, 1);
-		}
+		const sleepTime = m_down ? 2000 : 1;
+		y++;
+		if (y > yimlen-1) y = 0;
+        setTimeout(scanline, sleepTime);
+	}
 
 	if (startScanning) scanline();
 }
@@ -844,7 +841,7 @@ function main()
 	$('viewPNG').onclick = function(_e)
 	{
 		var link = document.createElement('a');
-		link.download = 'mandelbulb-' + renderpass + '-' + completeness + '.png';
+		link.download = 'mandelbulb-' + renderpass + '-' + max_alpha + '.png';
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	};
@@ -950,24 +947,30 @@ function main()
 		draw(false);
 	}
 
+	$("iterationsInput").onchange = function() {
+		iterations = parseInt($("iterationsInput").value);
+		reset = 1;
+	}
+
+	$("inverseAzimuth").onchange = function() {
+		azimuth = $("inverseAzimuth").checked ? -1 : 1;
+		reset = 1;
+	}
+
 	$('canvasControls').onmousedown = function(e)
 	{
-		console.log("mouse down!");
-
-		if (e.ctrlKey)
-		{
-			azimuth = -azimuth;
-			console.log("azimuth is " + azimuth);
-			reset = 1;
-			return;
-		}
-
 		m_down = true;
-
-		xanchor = e.clientX - this.offsetLeft;
-		yanchor = e.clientY - this.offsetTop;
-
+		var rect = ccanvas.getBoundingClientRect();
+		xanchor = e.clientX - rect.left;
+		yanchor = e.clientY - rect.top;
 		console.log(xanchor + " " + yanchor + " - " + this.offsetLeft + " " + this.offsetTop);
+	}
+
+	$('canvasControls').oncontextmenu = function(e)
+	{
+		e.preventDefault();
+		var panel = $('description');
+		panel.style.display = (panel.style.display === 'none') ? '' : 'none';
 	}
 
 	$('canvasControls').onmousemove = function(e)
@@ -980,8 +983,9 @@ function main()
 			// clear out old box first
 			c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
-			xcurr = e.clientX - this.offsetLeft;
-			ycurr = e.clientY - this.offsetTop;
+			var rect = ccanvas.getBoundingClientRect();
+			xcurr = e.clientX - rect.left;
+			ycurr = e.clientY - rect.top;
 
 			var dx = Math.abs(xcurr - xanchor);
 			var dy = Math.abs(ycurr - yanchor);
@@ -1003,8 +1007,9 @@ function main()
 
 		// do the zoom and restart render
 		m_down = false;
-		xcurr = e.clientX - this.offsetLeft;
-		ycurr = e.clientY - this.offsetTop;
+		var rect = ccanvas.getBoundingClientRect();
+		xcurr = e.clientX - rect.left;
+		ycurr = e.clientY - rect.top;
 
 		var dx = Math.abs(xcurr - xanchor);
 		var dy = Math.abs(ycurr - yanchor);
@@ -1070,7 +1075,7 @@ function readHashTag()
 			case 'ycen': {
 				ycen = parseFloat(val);
 				console.log("readHashTag() ycen : " + ycen);
-				redraw = true;
+				reDraw = true;
 				break;
 			} 
 			case 'power': {
@@ -1118,7 +1123,14 @@ function readHashTag()
 			}
 			case 'azimuth': {
 				azimuth = parseFloat(val);
+				$("inverseAzimuth").checked = (azimuth === -1);
 				console.log("readHashTag() azimuth : " + azimuth);
+				break;
+			}
+			case 'formula': {
+				formula = parseInt(val);
+				$("formulaSelect").value = formula;
+				console.log("readHashTag() formula : " + formula);
 				break;
 			}
 		}
@@ -1135,5 +1147,5 @@ function updateHashTag()
 	$("zoomInput").value = zoom;
 	$("xcenInput").value = xcen;
 	$("ycenInput").value = ycen;
-	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth;
+	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula;
 }

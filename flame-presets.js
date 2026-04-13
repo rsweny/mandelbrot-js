@@ -28,7 +28,7 @@ const FLAME_PRESETS = [
     },
     {
         name: "Mushrooms",
-        zoom: 1.0,
+        zoom: 0.7,
         xcen: 0.0,
         ycen: 0.0,
         formula: [

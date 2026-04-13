@@ -42,7 +42,10 @@
 
       #description {
         z-index: 10;
-        position: absolute;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
         background-color: rgba(30, 30, 30, 0.6);
         font-family: sans-serif;
         padding: 20px;
@@ -52,6 +55,8 @@
         text-shadow: 0px 1px 0px rgb(40, 40, 40);
         width: 300px;
         user-select: none;
+        overflow-y: auto;
+        box-sizing: border-box;
       }
 
       #description table {
