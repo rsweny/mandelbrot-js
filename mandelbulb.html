@@ -286,6 +286,303 @@
       <canvas id="canvasControls" width="0" height="0"> </canvas>
     </div>
 
+    <!-- Worker source embedded as an inert script block so it works on file:// origins. mandelbulb.js reads this and creates a Blob URL from it. -->
+    <script type="text/mandelbulb-worker" id="workerScript">
+'use strict';
+
+var cfg     = null;
+var occSnap = null;  // Float32Array snapshot of main-thread occlusionPositions, updated periodically
+
+// ---------- matrix math repeated from matrix.js ----------
+function matrix(rows, cols, def) {
+    var arr = [];
+    for (var i = 0; i < rows; i++) {
+        arr.push([]);
+        for (var j = 0; j < cols; j++) arr[i][j] = def;
+    }
+    return arr;
+}
+
+function rotateVector(p, rot, x, y, z) {
+    p[0] = rot[0][0]*x + rot[0][1]*y + rot[0][2]*z;
+    p[1] = rot[1][0]*x + rot[1][1]*y + rot[1][2]*z;
+    p[2] = rot[2][0]*x + rot[2][1]*y + rot[2][2]*z;
+}
+// --------------------
+
+function blur(orig, blur_factor) {
+    if (blur_factor > 0) {
+        blur_factor -= cfg.focus_depth;
+        if (blur_factor < 0) return;
+    }
+    var r2 = Math.random() * 2 * Math.PI;
+    var dr = Math.random() * cfg.factorDOF * blur_factor;
+    orig[0] += dr * Math.cos(r2);
+    orig[2] += dr * Math.sin(r2);
+}
+
+function insideFractal(data, trace_history) {
+    var magnitude, r, theta_power, r_power, phi, phi_cos, phi_sin;
+    var iter = 0;
+    var x = data[0], y = data[1], z = data[2];
+    var pixelColor = 0.0;
+    var power = cfg.power, formula = cfg.formula, azimuth = cfg.azimuth, iterations = cfg.iterations;
+    do {
+        magnitude = x*x + y*y + z*z;
+        r = Math.sqrt(magnitude);
+        theta_power = Math.atan2(y, x) * power;
+        r_power = Math.pow(r, power);
+        if (formula == 0) {
+            // 2D compatible / sin
+            phi = Math.asin(z / r);
+            phi_cos = Math.cos(phi * power);
+            x = r_power * Math.cos(theta_power) * phi_cos + data[0];
+            y = r_power * Math.sin(theta_power) * phi_cos + data[1];
+            z = r_power * Math.sin(phi * power) * azimuth + data[2];
+            pixelColor = phi / 3.0;
+        } else if (formula == 1) {
+            // wikipedia / original / cos
+            phi = Math.atan2(Math.sqrt(x*x + y*y), z);
+            phi_sin = Math.sin(phi * power);
+            x = r_power * Math.cos(theta_power) * phi_sin + data[0];
+            y = r_power * Math.sin(theta_power) * phi_sin + data[1];
+            z = r_power * Math.cos(phi * power) * azimuth + data[2];
+            pixelColor = phi / 3.0;
+        }
+
+        // used for glow / fog
+        if (trace_history != null) {
+            trace_history[iter][0] = x;
+            trace_history[iter][1] = y;
+            trace_history[iter][2] = z;
+            trace_history[iter][3] = iter;
+            trace_history[iter][4] = pixelColor;
+        }
+        iter++;
+    } while (iter < iterations && r < 8);
+    data[3] = iter;
+    data[4] = pixelColor;
+}
+
+function calculateRay(origPoint, steps, stepx, stepy, stepz, bright, rndFuzzy, goodPoints) {
+    stepx *= rndFuzzy; stepy *= rndFuzzy; stepz *= rndFuzzy;
+    var x = origPoint[0], y = origPoint[1], z = origPoint[2];
+    for (var i = 1; i < steps; i++) {
+        origPoint[0] += stepx * i;
+        origPoint[1] += stepy * i;
+        origPoint[2] += stepz * i;
+        insideFractal(origPoint, null);
+        if (origPoint[3] == cfg.iterations) {
+            // ray hit solid, this is in shadow
+            bright = 0.0;
+
+            //save points that are moderately close to the known surface
+            if (goodPoints != null) {
+                var clone = origPoint.slice(0);
+                goodPoints.push(clone);
+            }
+            break;
+        } else if (origPoint[3] < 3) {
+            // ray has left the general area of the solid, stop tracing.
+            break;
+        }
+    }
+    origPoint[0] = x; origPoint[1] = y; origPoint[2] = z;
+    return bright;
+}
+
+function calculateRays(origPoint, rndFuzzy, goodPoints) {
+    let light_factor = 1.0;
+    let rs = cfg.ray_step, lv = cfg.LightVector;
+    let n0 = rs / (15.0*Math.random() + 1);
+    let n1 = rs / (15.0*Math.random() + 1);
+    let n2 = rs / (15.0*Math.random() + 1);
+
+    // ambient light
+    light_factor += calculateRay(origPoint, cfg.RAY_STEPS,   -n0,          -n1,          -n2,          cfg.AMBIENT_LIGHT,  rndFuzzy, goodPoints);
+    light_factor += calculateRay(origPoint, cfg.RAY_STEPS,    n0,           n1,           n2,           cfg.AMBIENT_LIGHT,  rndFuzzy, goodPoints);
+    light_factor += calculateRay(origPoint, cfg.RAY_STEPS,    n0,          -n1,          -rs,           cfg.AMBIENT_LIGHT,  rndFuzzy, goodPoints);
+    light_factor += calculateRay(origPoint, cfg.RAY_STEPS,    n0*lv[0]*9,   n1*lv[1]*9,   n2*lv[2]*9,  cfg.AMBIENT_LIGHT,  rndFuzzy, goodPoints);
+
+    //direct light
+    light_factor += calculateRay(origPoint, cfg.RAY_STEPS*4,  rs*lv[0],     rs*lv[1],     rs*lv[2],    cfg.primary_light,  rndFuzzy, goodPoints);
+
+    return light_factor;
+}
+
+function reversePoint(fracPoint) {
+    var p = [0, 0, 0, fracPoint[3], fracPoint[4]];
+    rotateVector(p, cfg.IrotZ, fracPoint[0], fracPoint[1], fracPoint[2]);
+    var xx = p[0], yy = p[1], zz = p[2];
+    rotateVector(p, cfg.IrotX, xx, yy, zz);
+    var persp = 1.0 + p[1] * cfg.cameraPersp;
+    p[0] = ((p[0] * persp + cfg.xcen) / cfg.zoom) * cfg.ximlen + cfg.half_ximlen;
+    p[2] = ((p[2] * persp + cfg.ycen) / cfg.zoom) * cfg.yimlen + cfg.half_yimlen;
+    return p;
+}
+
+// ---------- pixel write helpers ----------
+
+// Flat array layout: [x, y, depth, r, g, b, a, setOcc]
+// setOcc = 1 → surface pixel, update occlusionPositions on the main thread
+// setOcc = 0 → fog pixel, only accumulate colour, leave occlusionPositions alone
+function pushPixel(pw, x, y, depth, r, g, b, a, setOcc) {
+    pw.push(x, y, depth, r, g, b, a, setOcc);
+}
+
+function plotShadowPixel(tx, ty, depth, colorVal, light_factor, pw) {
+    var ci = Math.min(255, Math.floor(Math.abs(colorVal) * 255.0));
+    pushPixel(pw, tx, ty, depth,
+        (cfg.pallet[ci][0] * light_factor) / cfg.shadow_darkness,
+        (cfg.pallet[ci][1] * light_factor) / cfg.shadow_darkness,
+        (cfg.pallet[ci][2] * light_factor) / cfg.shadow_darkness,
+        1.0, 1);  // setOcc = 1: surface pixels own occlusionPositions
+}
+
+function plotPixel(x, yRow, depth, color, light_factor, pw) {
+    if (cfg.cameraDOF > 0) {
+        var bp = [x, 0, yRow];
+        blur(bp, cfg.focus - depth);
+        var tx = Math.floor(bp[0]), ty = Math.floor(bp[2]);
+        if (tx >= 0 && ty >= 0 && tx < cfg.ximlen && ty < cfg.yimlen) {
+            if (occSnap && depth > occSnap[tx * cfg.yimlen + ty] + cfg.stepDetail) return;
+            plotShadowPixel(tx, ty, depth, color, light_factor, pw);
+        }
+    } else {
+        plotShadowPixel(x, yRow, depth, color, light_factor, pw);
+    }
+}
+
+function plotFogPixel(origPoint, factor, r, g, b, pw) {
+    var sp = reversePoint(origPoint);
+    var tx = Math.round(sp[0]), ty = Math.round(sp[2]), depth = sp[1];
+    if (tx >= 0 && ty >= 0 && tx < cfg.ximlen && ty < cfg.yimlen) {
+        if (occSnap && depth > occSnap[tx * cfg.yimlen + ty]) return;  // solid occludes glow
+        if (cfg.cameraDOF > 0) {
+            blur(sp, cfg.focus - depth);
+            tx = Math.round(sp[0]); ty = Math.round(sp[2]);
+            if (tx < 0 || ty < 0 || tx >= cfg.ximlen || ty >= cfg.yimlen) return;
+        }
+        pushPixel(pw, tx, ty, depth, r * factor, g * factor, b * factor, factor, 0);  // setOcc = 0: fog must not overwrite occlusion depth
+    }
+}
+
+// ---------- main compute ----------
+
+function computeRow(yRow, min_y, max_y) {
+    var pw = [];
+    var vis = 0, all = 0, ray = 0;
+
+    var found_limit = Math.ceil(cfg.frost);
+    if (min_y == -2.0) found_limit = 0;
+
+    var trace_history = matrix(cfg.iterations + 1, 5, 0.0);
+    var jitter1 = ((0.5 - Math.random()) / cfg.ximlen) * 0.4;
+    var jitter2 = ((0.5 - Math.random()) / cfg.yimlen) * 0.4;
+    var stepAmount = (cfg.stepDetail + Math.random() * cfg.stepDetail) * cfg.root_zoom;
+    var z2 = (yRow / cfg.yimlen - 0.5 + jitter1) * cfg.zoom - cfg.ycen;
+
+    for (var x = 0; x < cfg.ximlen; x++) {
+
+        // convert screen to fractal coordinates
+        var x2 = (x / cfg.ximlen - 0.5 + jitter2) * cfg.zoom - cfg.xcen;
+
+        for (var y = min_y; y < max_y; y += stepAmount) {
+            all++;
+
+            // rotate coordinate system from screen to fractal coordinates
+            var persp = 1.0 + y * cfg.cameraPersp;
+            var point3D = [0, 0, 0, 0, 0];
+            rotateVector(point3D, cfg.CameraMatrix, x2 / persp, y, z2 / persp);
+
+            // do the calculation
+            insideFractal(point3D, trace_history);
+            var iter = point3D[3], color = point3D[4];
+
+            if (iter == cfg.iterations) {
+
+                // plot pixel
+                var goodPoints = [];
+                var rndFuzzy = Math.max(cfg.opacity * Math.random(), 0.4);
+                var light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
+                plotPixel(x, yRow, y, color, light_factor, pw);
+                vis++;
+
+                // plot more pixels near the surface
+                var found = 0, counter = 0;
+                while (found < found_limit && counter < 100 * cfg.frost) {
+                    var newy = y - stepAmount * Math.random() * 2.0;
+                    persp = 1.0 + newy * cfg.cameraPersp;
+                    rotateVector(point3D, cfg.CameraMatrix, x2 / persp, newy, z2 / persp);
+                    insideFractal(point3D, null);
+                    iter = Math.floor(point3D[3]);
+					          color = point3D[4];
+                    if (iter == cfg.iterations) {
+                        light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
+                        plotPixel(x, yRow, newy, color, light_factor, pw);
+                        vis++;
+                        found++;
+                    }
+                    counter++;
+                }
+
+                // plot additional points found from ray tracing
+                if (cfg.frost > 0.9) {
+                    for (var i = 0; i < goodPoints.length; i++) {
+                        var traced_point = goodPoints[i];
+                        const color = traced_point[4];
+                        light_factor = 1.0 + calculateRays(traced_point, rndFuzzy, null);
+                        var sp = reversePoint(traced_point);
+                        var tx = Math.round(sp[0]), ty = Math.round(sp[2]);
+                        if (tx >= 0 && ty >= 0 && tx < cfg.ximlen && ty < cfg.yimlen && (!occSnap || sp[1] < occSnap[tx * cfg.yimlen + ty])) {
+                            plotPixel(tx, ty, sp[1], color, light_factor, pw);
+                            ray++;
+                        }
+                    }
+                }
+                break;
+
+            } else if (min_y != -2.0) {
+                // after we have done one pass to generate the rough occlusions
+                // use much smaller and more accurate stepAmount
+                var rnd = Math.random();
+                stepAmount = (cfg.stepDetail + rnd * cfg.stepDetail) * ((cfg.iterations / iter) / cfg.iterations) * cfg.root_zoom * 0.5;
+                
+                // for points not in the set, optionally plot traces that act as a fog / glow
+                if (cfg.fog_factor > 0 && rnd > 0.9 && iter > 1) {
+                    var fc = cfg.fog_color;
+                    for (var c = 0; c < iter; c++) {
+                        plotFogPixel(trace_history[c], cfg.fog_factor, fc.r, fc.g, fc.b, pw);
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        yRow: yRow,
+        pixelWrites: new Float64Array(pw),
+        stats: { visiblePixels: vis, allPixels: all, rayPoints: ray }
+    };
+}
+
+// ---------- message handler ----------
+
+self.onmessage = function(e) {
+    var msg = e.data;
+    if (msg.type === 'init') {
+        cfg = msg.config;
+        occSnap = new Float32Array(cfg.ximlen * cfg.yimlen);  // start with all-zero snapshot
+    } else if (msg.type === 'occlusion') {
+        occSnap = msg.data;  // updated snapshot from main thread (every 50 passes)
+    } else if (msg.type === 'compute') {
+        var result = computeRow(msg.yRow, msg.min_y, msg.max_y);
+        self.postMessage(result, [result.pixelWrites.buffer]);
+    }
+};
+    </script>
+
+    <script type="text/javascript" src="matrix.js"></script>
     <script type="text/javascript" src="palettes.js"></script>
     <script type="text/javascript" src="mandelbulb.js"></script>
 

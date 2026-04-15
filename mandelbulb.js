@@ -92,6 +92,19 @@ var visiblePixels, allPixels, rayPoints;
 var renderpass = 0;
 var max_alpha = 1;
 
+// worker pool (web workers for parallel scanline rendering)
+var workerPool = [];
+var workerGen   = 0;   // incremented on each restart; stale results are discarded
+var renderY     = 0;   // next row to dispatch
+
+// Build a Blob URL from the inert <script type="text/mandelbulb-worker"> block so that
+// workers load correctly on file:// origins (no HTTP server required).
+var WORKER_BLOB_URL = (function() {
+    var src = document.getElementById('workerScript').textContent;
+    var blob = new Blob([src], { type: 'application/javascript' });
+    return URL.createObjectURL(blob);
+}());
+
 // initialize canvas
 var canvas = $('canvasMandelbrot');
 canvas.width  = 1800;
@@ -105,35 +118,23 @@ var ctx_img = ctx.createImageData(canvas.width, canvas.height);
 // JQuery shorthand
 function $(id) { return document.getElementById(id) }
 
-function matrix(rows, cols, defaultValue) {
-	var arr = [];
-	for(var i = 0; i < rows; i++) {
-		arr.push([]);
-		arr[i].push(new Array(cols));
-
-		for(var j=0; j < cols; j++) {
-			arr[i][j] = defaultValue;
-		}
-	}
-	return arr;
-}
-	
 function updateMinMaxY()
 {
-	console.log("updateMinMaxY()");
+	console.log("--------------------------updateMinMaxY()");
 	min_y = HORIZON;
 	max_y = -HORIZON;
 	for (var i=0; i<ximlen; i++)
 	{
 		for (var j=0; j<yimlen; j++)
 		{
-			if (occlusionPositions[i][j] < min_y)
+			var _occ = occlusionPositions[i * yimlen + j];
+			if (_occ < min_y)
 			{
-				min_y = occlusionPositions[i][j]-stepDetail;
+				min_y = _occ - stepDetail;
 			}
-			else if (occlusionPositions[i][j] != HORIZON && occlusionPositions[i][j] > max_y)
+			else if (_occ != HORIZON && _occ > max_y)
 			{
-				max_y = occlusionPositions[i][j]+stepDetail;
+				max_y = _occ + stepDetail;
 			}
 		}
 	}
@@ -164,7 +165,7 @@ function clearScreenAndReset()
 	min_y = -2.0;
 	max_y = 2.0;
 	
-	occlusionPositions = matrix(canvas.width,canvas.height,0.0);
+	occlusionPositions = new Float32Array(ximlen * yimlen); // initialised to 0
 	img_alpha = matrix(canvas.width, canvas.height, 0.0);
 	img_red = matrix(canvas.width, canvas.height, 0.0);
 	img_green = matrix(canvas.width, canvas.height, 0.0);
@@ -173,6 +174,7 @@ function clearScreenAndReset()
 	m_down = false;
 }
 	
+/*
 function gridpoints(yRow)
 {
 	//make first pass quick
@@ -312,13 +314,6 @@ function plotPixel(x, yRow, depth, color, light_factor)
 	}
 }
 	
-function rotateVector(point3D, rot, x, y, z)
-{
-	point3D[0] = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z;
-	point3D[1] = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z;
-	point3D[2] = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z;
-}
-	
 function blur(orig, blur_factor)
 {
 	if (blur_factor > 0)
@@ -392,7 +387,7 @@ function insideFractal(data, trace_history)
 	data[3] = iter;
 	data[4] = pixelColor;
 }
-	
+
 function calculateRays(origPoint, rndFuzzy, goodPoints)
 {
 	var light_factor = 1.0;
@@ -435,7 +430,7 @@ function calculateRay(origPoint, steps,stepx,stepy, stepz, bright, rndFuzzy, goo
 		{
 			//ray hit solid, this is in shadow
 			bright = 0.0;
-			if (goodPoints != null /*&& i > 1*/)
+			if (goodPoints != null)
 			{
 				//save points that are moderately close to the known surface
 
@@ -464,7 +459,6 @@ function calculateRay(origPoint, steps,stepx,stepy, stepz, bright, rndFuzzy, goo
 	return bright;
 }
 	
-
 function plotShadowPixel(tempx, tempy, depth, colorVal, light_factor)
 {
 	//get color
@@ -530,6 +524,7 @@ function reversePoint(fracPoint)
 	
 	return point3D;
 }
+*/
 	
 function setCamera()
 {
@@ -542,134 +537,6 @@ function setCamera()
 	IrotZ = RotateZ(-cameraYaw);
 }
 	
-function RotateX(angle)
-{
-	var rot = matrix(3,3,0.0);
-	var s = Math.sin(angle);
-	var c = Math.cos(angle);
-	rot[0][0] = 1.0;
-	rot[1][1] = c;
-	rot[2][2] = c;
-	rot[1][2] = -s;
-	rot[2][1] = s;
-	return rot;
-}
-
-function RotateY(angle)
-{
-	var rot = matrix(3,3,0.0);
-	var s = Math.sin(angle);
-	var c = Math.cos(angle);
-	rot[1][1] = 1.0;
-	rot[2][2] = c;
-	rot[0][0] = c;
-	rot[2][0] = -s;
-	rot[0][2] = s;
-	return rot;
-}
-	
-function RotateZ(angle)
-{
-	var rot = matrix(3,3,0.0);
-	var s = Math.sin(angle);
-	var c = Math.cos(angle);
-	rot[2][2] = 1.0;
-	rot[0][0] = c;
-	rot[1][1] = c;
-	rot[0][1] = -s;
-	rot[1][0] = s;
-	return rot;
-}
-	
-function matrixMult(m, matrixArr)
-{
-	var result = matrix(3,3,0.0);
-	result[0][0] = m[0][0] * matrixArr[0][0] + m[0][1] * matrixArr[1][0] + m[0][2] * matrixArr[2][0];
-	result[0][1] = m[0][0] * matrixArr[0][1] + m[0][1] * matrixArr[1][1] + m[0][2] * matrixArr[2][1];
-	result[0][2] = m[0][0] * matrixArr[0][2] + m[0][1] * matrixArr[1][2] + m[0][2] * matrixArr[2][2];
-	result[1][0] = m[1][0] * matrixArr[0][0] + m[1][1] * matrixArr[1][0] + m[1][2] * matrixArr[2][0];
-	result[1][1] = m[1][0] * matrixArr[0][1] + m[1][1] * matrixArr[1][1] + m[1][2] * matrixArr[2][1];
-	result[1][2] = m[1][0] * matrixArr[0][2] + m[1][1] * matrixArr[1][2] + m[1][2] * matrixArr[2][2];
-	result[2][0] = m[2][0] * matrixArr[0][0] + m[2][1] * matrixArr[1][0] + m[2][2] * matrixArr[2][0];
-	result[2][1] = m[2][0] * matrixArr[0][1] + m[2][1] * matrixArr[1][1] + m[2][2] * matrixArr[2][1];
-	result[2][2] = m[2][0] * matrixArr[0][2] + m[2][1] * matrixArr[1][2] + m[2][2] * matrixArr[2][2];
-	return result;
-}
-
-/* Matrix Ops */
-function determinant(mat) 
-{
-	var result = 0;
-	
-	if(mat.length == 1) {
-		result = mat[0][0];
-		return result;
-	}
-
-	if(mat.length == 2) {
-		result = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
-		return result;
-	} 
-
-	for(var i = 0; i < mat[0].length; i++) 
-	{
-		var temp = matrix(mat.length - 1, mat[0].length - 1, 0.0);
-		for(var j = 1; j < mat.length; j++)
-		{
-			for(var k = 0; k < mat[0].length; k++) 
-			{
-				if(k < i) {
-				temp[j - 1][k] = mat[j][k];
-				} else if(k > i) {
-				temp[j - 1][k - 1] = mat[j][k];
-				}
-			}
-		}
-
-		result += mat[0][i] * Math.pow(-1, i) * determinant(temp);
-	}
-	return result;
-} 
-
-function cofactor3x3T(m) 
-{
-	var temp = matrix(m[0].length, m[0].length, 0.0);
-	temp[0][0] = m[1][1]*m[2][2] - m[1][2]*m[2][1];
-	temp[1][0] = m[0][2]*m[2][1] - m[0][1]*m[2][2];
-	temp[2][0] = m[0][1]*m[1][2] - m[0][2]*m[1][1];
-	temp[0][1] = m[1][2]*m[2][0] - m[1][0]*m[2][2];
-	temp[1][1] = m[0][0]*m[2][2] - m[0][2]*m[2][0];	
-	temp[2][1] = m[0][2]*m[1][0] - m[0][0]*m[1][2];
-	temp[0][2] = m[1][0]*m[2][1] - m[1][1]*m[2][0];
-	temp[1][2] = m[0][1]*m[2][0] - m[0][0]*m[2][1];
-	temp[2][2] = m[0][0]*m[1][1] - m[0][1]*m[1][0];
-	return temp;
-} 
-
-function inverse(m)
-{
-	var d = determinant(m);
-	if (d == 0) d = 0.00001;  //dubious
-	
-	var cofactorT = cofactor3x3T(m);
-	d = 1/d;
-	constMul(d, cofactorT);
-	return cofactorT;
-}
-	
-function constMul(d, m)
-{
-	m[0][0] *= d;
-	m[0][1] *= d;
-	m[0][2] *= d;
-	m[1][0] *= d;
-	m[1][1] *= d;
-	m[1][2] *= d;
-	m[2][0] *= d;
-	m[2][1] *= d;
-	m[2][2] *= d;
-}
-
 function setZoom(z)
 {
 	zoom = z;
@@ -696,73 +563,143 @@ function draw(startScanning)
 
 function render(startScanning)
 {
-	var start  = (new Date).getTime();
-	var lastUpdate = start;
-	var pixels = 0;
+	if (!startScanning) return;  // workers handle reset signals themselves
 
-	var y = 0;
-	var scanline = function()
-	{
-		if (reset == 1)
-		{
-			console.log("reset render at first line");
-			reset = 0;
-			y = 0;
-			clearScreenAndReset();
-		}
-		else if (reset == 2)
-		{
-			reset = 0;
-			updateHistogram();
-		}
-		
+	var start      = (new Date).getTime();
+	var lastUpdate = start;
+	var pixels     = 0;
+
+	// Terminate any previously running workers
+	workerPool.forEach(function(w) { w.terminate(); });
+	workerPool = [];
+	workerGen++;
+	renderY = 0;
+
+	var gen = workerGen;  // captured for stale-result detection
+
+	function generateConfig() {
+		return {
+			ximlen: ximlen, yimlen: yimlen,
+			zoom: zoom, xcen: xcen, ycen: ycen,
+			half_ximlen: half_ximlen, half_yimlen: half_yimlen,
+			cameraPersp: cameraPersp,
+			iterations: iterations, formula: formula, azimuth: azimuth, power: power,
+			stepDetail: stepDetail, frost: frost,
+			root_zoom: root_zoom, opacity: opacity,
+			focus: focus, focus_depth: focus_depth,
+			cameraDOF: cameraDOF, factorDOF: factorDOF,
+			LightVector: LightVector, RAY_STEPS: RAY_STEPS,
+			AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
+			shadow_darkness: shadow_darkness, HORIZON: HORIZON,
+			ray_step: ray_step,
+			CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
+			fog_factor: fog_factor, fog_color: fog_color,
+			pallet: pallet
+		};
+	}
+
+	function applyResult(data) {
 		renderpass++;
-		
-		gridpoints(y);
-		if (renderpass % ximlen == 0) updateMinMaxY();
 		pixels += ximlen;
-		
-		if (renderpass % 50 == 0)
-		{
+		visiblePixels += data.stats.visiblePixels;
+		allPixels     += data.stats.allPixels;
+		rayPoints     += data.stats.rayPoints;
+
+		// Replicate the per-pixel occlusion reset that the original gridpoints() did
+		// for every x in the processed row before searching for a surface.
+		var yRow = data.yRow;
+		for (var xd = 0; xd < ximlen; xd++) {
+			occlusionPositions[xd * yimlen + yRow] = HORIZON;
+		}
+
+		// Apply pixel writes: flat Float64Array [x, y, depth, r, g, b, a, setOcc, ...]
+		// setOcc=1 → surface pixel, update occlusionPositions; setOcc=0 → fog, colour only.
+		var pw = data.pixelWrites;
+		for (var i = 0; i < pw.length; i += 8) {
+			var px = pw[i], py = pw[i+1], depth = pw[i+2];
+			img_red[px][py]   += pw[i+3];
+			img_green[px][py] += pw[i+4];
+			img_blue[px][py]  += pw[i+5];
+			img_alpha[px][py] += pw[i+6];
+			if (pw[i+7]) occlusionPositions[px * yimlen + py] = depth;
+		}
+
+		if (renderpass % ximlen == 0) updateMinMaxY();
+
+		if (renderpass % 50 == 0) {
 			const t2 = (new Date()).getTime();
 			const completeness = Math.round(max_alpha*100)/100.0;
-			const strStatus = (new Date()).toISOString().substring(0,19) + " " + y + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + renderpass + " max value: " + completeness + " in " + (t2-t1);
+			const strStatus = (new Date()).toISOString().substring(0,19) + " " + data.yRow + " " + visiblePixels + " " + rayPoints + " " + allPixels + " Pass: " + renderpass + " max value: " + completeness + " in " + (t2-t1);
 			t1 = (new Date()).getTime();
 			console.log(strStatus);
 			updateHistogram();
-
-			//autosave png and last 5 states.
-			//if (lastDir != null && lastDir.length() > 0 && (currentPass % 5000 == 0) )
-			//{
-			//	writePNG(lastDir + "Mandelbulb-" + currentPass + "-" + completeness + "-" + ximlen + "x" + yimlen + ".png");
-			//	writeFractalData(lastDir + "Mandelbulb-" + (currentPass%30000) + "-" + ximlen + "x" + yimlen + ".fractal");
-			//}
-			
 			visiblePixels = 0;
 			allPixels = 0;
 			rayPoints = 0;
+			// Send a fresh occlusion snapshot to all workers so they can filter
+			// fog and ray-traced goodPoints against up-to-date surface depths.
+			var snap = occlusionPositions.slice();
+			workerPool.forEach(function(w) {
+				w.postMessage({ type: 'occlusion', data: snap });
+			});
 		}
 
 		var now = (new Date).getTime();
-		if ( (now - lastUpdate) >= 10000) {
-			// Update speed and time taken
-			var elapsed = (now - start)/1000.0;
-			var speed = Math.floor(pixels / elapsed);
-
+		if ((now - lastUpdate) >= 10000) {
+			var elapsed = (now - start) / 1000.0;
 			$('renderTime').innerHTML = elapsed.toFixed(1) + " pass: " + renderpass;
-			$('renderSpeed').innerHTML = speed + " px/sec";
-
+			$('renderSpeed').innerHTML = Math.floor(pixels / elapsed) + " px/sec";
 			lastUpdate = now;
-        }
-
-		// yield control back to browser, so that canvas is updated
-		const sleepTime = m_down ? 2000 : 1;
-		y++;
-		if (y > yimlen-1) y = 0;
-        setTimeout(scanline, sleepTime);
+		}
 	}
 
-	if (startScanning) scanline();
+	function dispatchRow(worker) {
+		if (workerGen !== gen) return;  // this worker belongs to an old generation
+
+		// Send updated depth bounds so workers benefit from updateMinMaxY() refinements
+		worker.postMessage({ type: 'compute', yRow: renderY, min_y: min_y, max_y: max_y });
+		renderY++;
+		if (renderY > yimlen - 1) renderY = 0;
+	}
+
+	function onResult(worker) {
+		return function(e) {
+			if (workerGen !== gen) return;  // stale result from a superseded render
+
+			applyResult(e.data);
+
+			if (reset === 1) {
+				console.log("reset render");
+				reset = 0;
+				workerPool.forEach(function(w) { w.terminate(); });
+				workerPool = [];
+				clearScreenAndReset();
+				render(true);
+				return;
+			}
+			if (reset === 2) {
+				reset = 0;
+				updateHistogram();
+			}
+
+			// When mouse is held down, yield to the browser for 2 s before next row
+			if (m_down) {
+				setTimeout(function() { dispatchRow(worker); }, 2000);
+			} else {
+				dispatchRow(worker);
+			}
+		};
+	}
+
+	var NUM_WORKERS = 3;
+	var config = generateConfig();
+	for (var i = 0; i < NUM_WORKERS; i++) {
+		var w = new Worker(WORKER_BLOB_URL);
+		w.postMessage({ type: 'init', config: config });
+		w.onmessage = onResult(w);
+		workerPool.push(w);
+		dispatchRow(w);
+	}
 }
 
 
@@ -784,16 +721,14 @@ function updateHistogram()
 			green = ( (img_green[x][y]*z)/img_alpha[x][y] );
 			blue = ( (img_blue[x][y]*z)/img_alpha[x][y] );
 
-			//tool to view focus bouds
-			if (drawFocus && occlusionPositions[x][y] > focus) {
-				green = 20;
-				red = 20;
-				blue += 50;
-			}
-			else if (drawFocus && occlusionPositions[x][y] < focus - focus_depth) {
-				green = 20;
-				blue = 20;
-				red += 50;
+			//tool to view focus bounds
+			if (drawFocus) {
+				var _occ2 = occlusionPositions[x * yimlen + y];
+				if (_occ2 > focus) {
+					green = 20; red = 20; blue += 50;
+				} else if (_occ2 < focus - focus_depth) {
+					green = 20; blue = 20; red += 50;
+				}
 			}
 
 			if (red > 255) red = 255;
@@ -1149,3 +1084,6 @@ function updateHashTag()
 	$("ycenInput").value = ycen;
 	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula;
 }
+
+// file:///C:/devel/mandelbrot-js/mandelbulb.html#zoom=2.9&xcen=1.1019999999999999&ycen=-0.17883333333333334&contrast=0.5&brightness=1.8&fog=0.01&primary_light=38&power=2&dof=0&focus=-0.15&yaw=-0.8&pitch=0.1&azimuth=-1&formula=1
+// file:///C:/devel/mandelbrot-js/mandelbulb.html#zoom=0.6673544444444444&xcen=-0.02137944444444445&ycen=0.9455127777777776&contrast=1.08&brightness=2.62&fog=0.51&primary_light=28&power=3&dof=0&focus=-0.15&yaw=0.1&pitch=0.75&azimuth=-1&formula=1
