@@ -356,119 +356,13 @@ function render(startScanning)
 
 
 /*
- * Render one quick pass at 1/4 resolution, display a scaled-up preview on the
- * full canvas, then call onComplete() so the full-res render can begin.
+ * Render a preview pass using the WebGL2 fragment-shader renderer from
+ * gpu-preview.js. Produces a fully-lit image in well under a second, then
+ * hands off to the CPU progressive renderer for final quality.
  */
 function renderPreview(onComplete) {
-	var savedXimlen   = ximlen;
-	var savedYimlen   = yimlen;
-	var PREVIEW_SCALE = 4;
-
-	// Shrink dimensions to 1/4 for the preview pass
-	ximlen      = Math.floor(savedXimlen / PREVIEW_SCALE);
-	yimlen      = Math.floor(savedYimlen / PREVIEW_SCALE);
-
-	// img_* stay canvas-sized; occlusionPositions shrinks to preview footprint
-	clearScreenAndReset();
-
-	var gen           = ++workerGen;
-	renderY           = 0;
-	var rowsDone      = 0;
-	var previewDone   = false;
-	var previewXimlen = ximlen;
-	var previewYimlen = yimlen;
-
-	function applyPreviewResult(data) {
-		// var yRow = data.yRow;
-		// for (var xd = 0; xd < previewXimlen; xd++)
-		// 	occlusionPositions[xd * previewYimlen + yRow] = HORIZON;
-
-		var pw = data.pixelWrites;
-		for (var i = 0; i < pw.length; i += 8) {
-			var px = pw[i], py = pw[i+1], depth = pw[i+2];
-			img_red[px][py]   += pw[i+3];
-			img_green[px][py] += pw[i+4];
-			img_blue[px][py]  += pw[i+5];
-			img_alpha[px][py] += pw[i+6];
-			if (pw[i+7]) occlusionPositions[px * previewYimlen + py] = depth;
-		}
-
-		rowsDone++;
-		if (!previewDone && rowsDone >= previewYimlen) {
-			previewDone = true;
-			// Show the scaled-up preview before discarding the data
-			showPreviewHistogram(PREVIEW_SCALE, previewXimlen, previewYimlen);
-
-			// Terminate preview workers and discard data
-			workerPool.forEach(function(w) { w.terminate(); });
-			workerPool = [];
-
-			// Restore full resolution and hand off to the full render
-			ximlen      = savedXimlen;
-			yimlen      = savedYimlen;
-			if (onComplete) onComplete();
-		}
-	}
-
-	function dispatchPreviewRow(worker) {
-		if (workerGen !== gen || previewDone) return;
-		worker.postMessage({ type: 'compute', yRow: renderY, min_y: min_y, max_y: max_y });
-		renderY++;
-		if (renderY > previewYimlen - 1) renderY = 0;
-	}
-
-	var config = generateConfig();  // uses current (preview) ximlen / yimlen
-	var NUM_WORKERS = 3;
-	for (var i = 0; i < NUM_WORKERS; i++) {
-		var w = new Worker(WORKER_BLOB_URL);
-		w.postMessage({ type: 'init', config: config });
-		w.onmessage = (function(worker) {
-			return function(e) {
-				if (workerGen !== gen || previewDone) return;
-				applyPreviewResult(e.data);
-				if (!previewDone) dispatchPreviewRow(worker);
-			};
-		})(w);
-		workerPool.push(w);
-		dispatchPreviewRow(w);
-	}
-}
-
-/*
- * Nearest-neighbour upscale of the preview pixel data to fill the full canvas.
- */
-function showPreviewHistogram(scale, previewXimlen, previewYimlen) {
-	// Find peak accumulated alpha in the preview region
-	var peak = 0;
-	for (var i = 0; i < previewXimlen; i++)
-		for (var j = 0; j < previewYimlen; j++)
-			if (img_alpha[i][j] > peak) peak = img_alpha[i][j];
-	var max_a = Math.pow(peak, gradient);
-	if (max_a === 0) max_a = 1;
-
-	var off = 0;
-	for (var y = 0; y < canvas.height; y++) {
-		var sy = Math.floor(y / scale);
-		for (var x = 0; x < canvas.width; x++) {
-			var sx    = Math.floor(x / scale);
-			var alpha = img_alpha[sx][sy];
-			var red = 0, green = 0, blue = 0;
-			if (alpha > 0) {
-				var z = Math.pow(alpha, gradient) * brightness / max_a;
-				red   = (img_red[sx][sy]   * z) / alpha;
-				green = (img_green[sx][sy] * z) / alpha;
-				blue  = (img_blue[sx][sy]  * z) / alpha;
-				if (red   > 255) red   = 255;
-				if (green > 255) green = 255;
-				if (blue  > 255) blue  = 255;
-			}
-			ctx_img.data[off++] = red;
-			ctx_img.data[off++] = green;
-			ctx_img.data[off++] = blue;
-			ctx_img.data[off++] = 255;
-		}
-	}
-	ctx.putImageData(ctx_img, 0, 0);
+	renderPreviewGPU(canvas, ctx);
+	if (onComplete) onComplete();
 }
 
 function updateHistogram()
@@ -749,7 +643,7 @@ function main()
 	setZoom(zoom);
 	init();
 	updateHashTag();
-	// Quick 1/4-resolution preview pass, pause 10 s, then start the full render.
+	// GPU preview pass, pause 10 s, then start the full CPU render.
 	renderPreview(function() {
 		setTimeout(function() { clearScreenAndReset(); draw(true); }, 10000);
 	});
