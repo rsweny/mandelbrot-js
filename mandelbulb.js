@@ -66,7 +66,6 @@ var focus = -0.15; //higher values for further distance in focus.
 
 // data
 var root_zoom;
-var half_ximlen, half_yimlen;
 var occlusionPositions = null;
 var img_alpha = null;
 var img_red = null;
@@ -174,358 +173,6 @@ function clearScreenAndReset()
 	m_down = false;
 }
 	
-/*
-function gridpoints(yRow)
-{
-	//make first pass quick
-	var found_limit = Math.ceil(frost);
-	if (min_y == -2.0) found_limit = 0;
-	
-	var trace_history = matrix(iterations+1, 5, 0.0);
-
-	var jitter1 = ((0.5 - Math.random()) / ximlen)*0.4;
-	var jitter2 = ((0.5 - Math.random()) / yimlen)*0.4;
-	
-	//step amount for surface detection
-	var stepAmount = (stepDetail + Math.random()*stepDetail)*root_zoom;
-	
-	var z2 = (yRow / yimlen - 0.5 + jitter1) * zoom - ycen;
-	var red, green, blue;
-	for (var x = 0; x < ximlen; x++)
-	{
-		//convert screen to fractal coordinates
-		var x2 = (x / ximlen - 0.5 + jitter2) * zoom - xcen;
-		
-		//reset occlusion for this pixel
-		occlusionPositions[x][yRow] = HORIZON;
-		
-		//main loop for y values (depth)
-		for (var y = min_y; y < max_y; y += stepAmount)
-		{
-			allPixels++;
-	
-			//rotate coordinate system from screen to fractal coordinates
-			var persp = 1.0 + y * cameraPersp;
-			var fractal_x = x2 / persp;
-			var fractal_z = z2 / persp;
-			var point3D = [0,0,0,0,0];
-			rotateVector(point3D, CameraMatrix, fractal_x, y, fractal_z);
-
-			//do the calculation
-			insideFractal(point3D, trace_history);
-			var iter = point3D[3];
-			var color = point3D[4];
-
-			//if (allPixels%1000 == 0) console.log("checking " + point3D[0] + " " + point3D[1] + " " + point3D[2] + " " + point3D[3]);
-
-			if (iter == iterations)
-			{
-				//plot pixel
-				var goodPoints = [];
-				var rndFuzzy = Math.max(opacity*Math.random(), 0.4);
-				var light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
-				plotPixel(x, yRow, y, color, light_factor);
-				visiblePixels++;
-				
-				//plot more pixels near the surface
-				var found = 0;
-				var counter = 0;
-				var newy = y;
-				while (found < found_limit && counter < 100*frost) {
-					newy = y - stepAmount*Math.random()*2.0;
-					persp = 1.0 + newy * cameraPersp;
-					fractal_x = x2 / persp;
-					fractal_z = z2 / persp;
-					rotateVector(point3D, CameraMatrix, fractal_x, newy, fractal_z);
-					insideFractal(point3D, null);
-					iter = Math.floor(point3D[3]);
-					color = point3D[4];
-					if (iter == iterations) {
-						light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
-						plotPixel(x, yRow, y, color, light_factor);
-						visiblePixels++;
-						found++;
-					}
-					counter++;
-				}
-				
-				//plot additional points found from ray tracing
-				if (frost > 0.9)
-				{
-					for (let i = 0; i < goodPoints.length; i++)
-					{
-						const traced_point = goodPoints[i]; //double[]
-						color = traced_point[4];
-						light_factor = 1.0 + calculateRays(traced_point, rndFuzzy, null);
-						const screen_point = reversePoint(traced_point);
-						
-						//if the ray point is not occluded, draw it
-						const tempx = Math.round(screen_point[0]);
-						const tempy = Math.round(screen_point[2]);
-						if ( tempx >= 0 && tempy >= 0 && tempx < ximlen && tempy < yimlen && screen_point[1] < occlusionPositions[tempx][tempy]) {
-							plotPixel(tempx, tempy, screen_point[1], color, light_factor);
-							rayPoints++;
-						}
-					}
-				}
-				break;
-			}
-			else if (min_y != -2.0) //draw glow after first pass
-			{
-				//increase step accuracy after first pass and near surface
-				var rnd = Math.random();
-				stepAmount = (stepDetail + rnd*stepDetail) * ((iterations/iter) / iterations) * root_zoom * 0.5;
-				
-				const plot_start = 1;
-				if (fog_factor > 0 && rnd > 0.9 && iter > plot_start) {
-					red = fog_color.r;
-					green = fog_color.g;
-					blue = fog_color.b;
-					for (var c = 0; c < iter; c++) {
-						plotFogPixel(trace_history[c], fog_factor, red, green, blue);
-					}
-				}
-			}
-		}
-	}
-}
-	
-function plotPixel(x, yRow, depth, color, light_factor)
-{
-	if (cameraDOF > 0)
-	{
-		var blur_factor = focus-depth;
-		
-		var blurred_point = [ x, 0, yRow ];
-		blur(blurred_point, blur_factor);
-		
-		var tempx = Math.floor(blurred_point[0]);
-		var tempy = Math.floor(blurred_point[2]);
-		
-		if (tempx >= 0 && tempy >=0 && tempx < ximlen && tempy < yimlen)
-		{
-			if (depth > occlusionPositions[tempx][tempy] + stepDetail) return;
-			plotShadowPixel(tempx, tempy, depth, color, light_factor);
-		}
-	}
-	else
-	{
-		plotShadowPixel(x, yRow, depth, color, light_factor);
-	}
-}
-	
-function blur(orig, blur_factor)
-{
-	if (blur_factor > 0)
-	{
-		//increase the range that is in focus
-		blur_factor -= focus_depth;
-		if (blur_factor < 0) return;
-	}
-	
-	var r2 = Math.random()*2*Math.PI;
-	var dsin = Math.sin(r2);
-	var dcos = Math.cos(r2);
-	
-	var dr = Math.random() * factorDOF * blur_factor;
-	orig[0] = orig[0] + dr*dcos;
-	orig[2] = orig[2] + dr*dsin;
-}
-	
-function insideFractal(data, trace_history)
-{
-	var magnitude, r, theta_power, r_power, phi, phi_cos, phi_sin;
-	var iter = 0;
-	var x = data[0];
-	var y = data[1];
-	var z = data[2];
-	
-	var pixelColor = 0.0;
-	
-	do
-	{	
-		magnitude = x*x + y*y + z*z;
-		r = Math.sqrt(magnitude);
-		theta_power = Math.atan2(y,x)*power;
-		r_power = Math.pow(r,power);
-		
-		if (formula == 0)
-		{
-			//2D compatible / sin
-			phi = Math.asin(z / r);
-			phi_cos = Math.cos(phi*power);
-			x = r_power * Math.cos(theta_power) * phi_cos + data[0];
-			y = r_power * Math.sin(theta_power) * phi_cos + data[1];
-			z = r_power * Math.sin(phi*power)*azimuth + data[2];
-			pixelColor = phi / 3.0;
-		}
-		else if (formula == 1)
-		{
-			//wikipedia / original / cos
-			phi = Math.atan2(Math.sqrt(x*x + y*y), z);
-			phi_sin = Math.sin(phi*power);
-			x = r_power * Math.cos(theta_power) * phi_sin + data[0];
-			y = r_power * Math.sin(theta_power) * phi_sin + data[1];
-			z = r_power * Math.cos(phi*power)*azimuth + data[2];
-			pixelColor = phi / 3.0;
-		}
-
-		//used for nebula / fog
-		if (trace_history != null)
-		{
-			trace_history[iter][0] = x;
-			trace_history[iter][1] = y;
-			trace_history[iter][2] = z;
-			trace_history[iter][3] = iter;
-			trace_history[iter][4] = pixelColor;
-		}
-		
-		iter++;
-	}
-	while ( iter < iterations && r < 8 );
-
-	data[3] = iter;
-	data[4] = pixelColor;
-}
-
-function calculateRays(origPoint, rndFuzzy, goodPoints)
-{
-	var light_factor = 1.0;
-
-	var n0 = ray_step / (15.0*Math.random() + 1);
-	var n1 = ray_step / (15.0*Math.random() + 1);
-	var n2 = ray_step / (15.0*Math.random() + 1);
-	
-	//ambient light
-	light_factor += calculateRay(origPoint, RAY_STEPS, -n0, -n1, -n2, AMBIENT_LIGHT, rndFuzzy, goodPoints);
-	light_factor += calculateRay(origPoint, RAY_STEPS, n0, n1, n2, AMBIENT_LIGHT, rndFuzzy, goodPoints);
-	light_factor += calculateRay(origPoint, RAY_STEPS, n0, -n1, -ray_step, AMBIENT_LIGHT, rndFuzzy, goodPoints);
-	light_factor += calculateRay(origPoint, RAY_STEPS, n0*LightVector[0]*9.0,  n1*LightVector[1]*9.0, n2*LightVector[2]*9.0, AMBIENT_LIGHT, rndFuzzy, goodPoints);
-
-	//direct light
-	light_factor += calculateRay(origPoint, RAY_STEPS*4, ray_step*LightVector[0],  ray_step*LightVector[1], ray_step*LightVector[2], primary_light, rndFuzzy, goodPoints);
-	
-	return light_factor;
-}
-	
-
-function calculateRay(origPoint, steps,stepx,stepy, stepz, bright, rndFuzzy, goodPoints)
-{
-	stepx *= rndFuzzy;
-	stepy *= rndFuzzy;
-	stepz *= rndFuzzy;
-
-	var x = origPoint[0];
-	var y = origPoint[1];
-	var z = origPoint[2];
-	
-	for (var i = 1; i < steps; i++)
-	{
-		origPoint[0] += stepx*i;
-		origPoint[1] += stepy*i;
-		origPoint[2] += stepz*i;
-		
-		insideFractal( origPoint, null );
-		if ( origPoint[3] == iterations )
-		{
-			//ray hit solid, this is in shadow
-			bright = 0.0;
-			if (goodPoints != null)
-			{
-				//save points that are moderately close to the known surface
-
-				//double[] clone_data = new double[5];
-				//System.arraycopy(origPoint, 0, clone_data, 0, clone_data.length);
-
-				var clone_data = [];
-				for (var k = 0; k < origPoint.length; k++) {
-					clone_data[k] = origPoint[k];
-				}
-
-				goodPoints.push(clone_data);
-			}
-			break;
-		}
-		else if (origPoint[3] < 3)
-		{
-			//ray has left the general area of the solid, stop tracing.
-			break;
-		}
-	}
-	origPoint[0] = x;
-	origPoint[1] = y;
-	origPoint[2] = z;
-	
-	return bright;
-}
-	
-function plotShadowPixel(tempx, tempy, depth, colorVal, light_factor)
-{
-	//get color
-	var colorIndex = Math.floor(Math.abs(colorVal)*255.0);
-	if (colorIndex > 255) colorIndex = 255;
-	
-	//apply lighting
-	var red = (pallet[colorIndex][0]*light_factor) / shadow_darkness;
-	var green = (pallet[colorIndex][1]*light_factor) / shadow_darkness;
-	var blue = (pallet[colorIndex][2]*light_factor) / shadow_darkness;
-	
-	img_red[tempx][tempy] += red;
-	img_green[tempx][tempy] += green;
-	img_blue[tempx][tempy] += blue;
-	img_alpha[tempx][tempy] += 1.0;
-	
-	//record depth to mask fog
-	occlusionPositions[tempx][tempy] = depth;
-}
-	
-function plotFogPixel(origPoint, factor, r, g, b)
-{
-	var screenPoint = reversePoint(origPoint);
-	var tempx = Math.round(screenPoint[0]);
-	var tempy = Math.round(screenPoint[2]);
-	var depth = screenPoint[1];
-	if (tempx >= 0 && tempy >=0 && tempx < ximlen && tempy < yimlen) {
-		//solid occludes glow
-		if (depth > occlusionPositions[tempx][tempy]) return;
-
-		if (cameraDOF > 0) {
-			var blur_factor = focus-depth;
-			blur(screenPoint, blur_factor);
-			tempx = Math.round(screenPoint[0]);
-			tempy = Math.round(screenPoint[2]);
-			if (tempx < 0 || tempy < 0 || tempx > ximlen -1 || tempy > yimlen-1) return;
-		}
-		img_red[tempx][tempy] += (r*factor);
-		img_green[tempx][tempy] += (g*factor);
-		img_blue[tempx][tempy] += (b*factor);
-		img_alpha[tempx][tempy] += factor;
-	}
-}
-	
-function reversePoint(fracPoint)
-{
-	var point3D = [];
-	point3D[3] = fracPoint[3];
-	point3D[4] = fracPoint[4];
-	
-	rotateVector(point3D, IrotZ, fracPoint[0], fracPoint[1], fracPoint[2]);
-	var xx = point3D[0];
-	var yy = point3D[1];
-	var zz = point3D[2];
-	rotateVector(point3D, IrotX, xx, yy, zz);
-	
-	var persp = 1.0 + point3D[1] * cameraPersp;
-	point3D[0] = point3D[0]*persp;
-	point3D[2] = point3D[2]*persp;
-
-	point3D[0] = ((point3D[0] + xcen)/zoom)*ximlen + half_ximlen ;
-	point3D[2] = ((point3D[2] + ycen)/zoom)*yimlen + half_yimlen ;
-	
-	return point3D;
-}
-*/
-	
 function setCamera()
 {
 	// 3D camera precalc
@@ -561,6 +208,31 @@ function draw(startScanning)
 	render(startScanning);
 }
 
+function generateConfig() {
+	const half_ximlen = ximlen / 2;
+	const half_yimlen = yimlen / 2;
+	return {
+		ximlen,
+		yimlen,
+		half_ximlen,
+		half_yimlen,
+		zoom: zoom, xcen: xcen, ycen: ycen,
+		cameraPersp: cameraPersp,
+		iterations: iterations, formula: formula, azimuth: azimuth, power: power,
+		stepDetail: stepDetail, frost: frost,
+		root_zoom: root_zoom, opacity: opacity,
+		focus: focus, focus_depth: focus_depth,
+		cameraDOF: cameraDOF, factorDOF: factorDOF,
+		LightVector: LightVector, RAY_STEPS: RAY_STEPS,
+		AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
+		shadow_darkness: shadow_darkness, HORIZON: HORIZON,
+		ray_step: ray_step,
+		CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
+		fog_factor: fog_factor, fog_color: fog_color,
+		pallet: pallet
+	};
+}
+
 function render(startScanning)
 {
 	if (!startScanning) return;  // workers handle reset signals themselves
@@ -576,27 +248,6 @@ function render(startScanning)
 	renderY = 0;
 
 	var gen = workerGen;  // captured for stale-result detection
-
-	function generateConfig() {
-		return {
-			ximlen: ximlen, yimlen: yimlen,
-			zoom: zoom, xcen: xcen, ycen: ycen,
-			half_ximlen: half_ximlen, half_yimlen: half_yimlen,
-			cameraPersp: cameraPersp,
-			iterations: iterations, formula: formula, azimuth: azimuth, power: power,
-			stepDetail: stepDetail, frost: frost,
-			root_zoom: root_zoom, opacity: opacity,
-			focus: focus, focus_depth: focus_depth,
-			cameraDOF: cameraDOF, factorDOF: factorDOF,
-			LightVector: LightVector, RAY_STEPS: RAY_STEPS,
-			AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
-			shadow_darkness: shadow_darkness, HORIZON: HORIZON,
-			ray_step: ray_step,
-			CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
-			fog_factor: fog_factor, fog_color: fog_color,
-			pallet: pallet
-		};
-	}
 
 	function applyResult(data) {
 		renderpass++;
@@ -673,8 +324,9 @@ function render(startScanning)
 				reset = 0;
 				workerPool.forEach(function(w) { w.terminate(); });
 				workerPool = [];
-				clearScreenAndReset();
-				render(true);
+				renderPreview(function() {
+					setTimeout(function() { clearScreenAndReset(); render(true); }, 5000);
+				});
 				return;
 			}
 			if (reset === 2) {
@@ -702,6 +354,122 @@ function render(startScanning)
 	}
 }
 
+
+/*
+ * Render one quick pass at 1/4 resolution, display a scaled-up preview on the
+ * full canvas, then call onComplete() so the full-res render can begin.
+ */
+function renderPreview(onComplete) {
+	var savedXimlen   = ximlen;
+	var savedYimlen   = yimlen;
+	var PREVIEW_SCALE = 4;
+
+	// Shrink dimensions to 1/4 for the preview pass
+	ximlen      = Math.floor(savedXimlen / PREVIEW_SCALE);
+	yimlen      = Math.floor(savedYimlen / PREVIEW_SCALE);
+
+	// img_* stay canvas-sized; occlusionPositions shrinks to preview footprint
+	clearScreenAndReset();
+
+	var gen           = ++workerGen;
+	renderY           = 0;
+	var rowsDone      = 0;
+	var previewDone   = false;
+	var previewXimlen = ximlen;
+	var previewYimlen = yimlen;
+
+	function applyPreviewResult(data) {
+		// var yRow = data.yRow;
+		// for (var xd = 0; xd < previewXimlen; xd++)
+		// 	occlusionPositions[xd * previewYimlen + yRow] = HORIZON;
+
+		var pw = data.pixelWrites;
+		for (var i = 0; i < pw.length; i += 8) {
+			var px = pw[i], py = pw[i+1], depth = pw[i+2];
+			img_red[px][py]   += pw[i+3];
+			img_green[px][py] += pw[i+4];
+			img_blue[px][py]  += pw[i+5];
+			img_alpha[px][py] += pw[i+6];
+			if (pw[i+7]) occlusionPositions[px * previewYimlen + py] = depth;
+		}
+
+		rowsDone++;
+		if (!previewDone && rowsDone >= previewYimlen) {
+			previewDone = true;
+			// Show the scaled-up preview before discarding the data
+			showPreviewHistogram(PREVIEW_SCALE, previewXimlen, previewYimlen);
+
+			// Terminate preview workers and discard data
+			workerPool.forEach(function(w) { w.terminate(); });
+			workerPool = [];
+
+			// Restore full resolution and hand off to the full render
+			ximlen      = savedXimlen;
+			yimlen      = savedYimlen;
+			if (onComplete) onComplete();
+		}
+	}
+
+	function dispatchPreviewRow(worker) {
+		if (workerGen !== gen || previewDone) return;
+		worker.postMessage({ type: 'compute', yRow: renderY, min_y: min_y, max_y: max_y });
+		renderY++;
+		if (renderY > previewYimlen - 1) renderY = 0;
+	}
+
+	var config = generateConfig();  // uses current (preview) ximlen / yimlen
+	var NUM_WORKERS = 3;
+	for (var i = 0; i < NUM_WORKERS; i++) {
+		var w = new Worker(WORKER_BLOB_URL);
+		w.postMessage({ type: 'init', config: config });
+		w.onmessage = (function(worker) {
+			return function(e) {
+				if (workerGen !== gen || previewDone) return;
+				applyPreviewResult(e.data);
+				if (!previewDone) dispatchPreviewRow(worker);
+			};
+		})(w);
+		workerPool.push(w);
+		dispatchPreviewRow(w);
+	}
+}
+
+/*
+ * Nearest-neighbour upscale of the preview pixel data to fill the full canvas.
+ */
+function showPreviewHistogram(scale, previewXimlen, previewYimlen) {
+	// Find peak accumulated alpha in the preview region
+	var peak = 0;
+	for (var i = 0; i < previewXimlen; i++)
+		for (var j = 0; j < previewYimlen; j++)
+			if (img_alpha[i][j] > peak) peak = img_alpha[i][j];
+	var max_a = Math.pow(peak, gradient);
+	if (max_a === 0) max_a = 1;
+
+	var off = 0;
+	for (var y = 0; y < canvas.height; y++) {
+		var sy = Math.floor(y / scale);
+		for (var x = 0; x < canvas.width; x++) {
+			var sx    = Math.floor(x / scale);
+			var alpha = img_alpha[sx][sy];
+			var red = 0, green = 0, blue = 0;
+			if (alpha > 0) {
+				var z = Math.pow(alpha, gradient) * brightness / max_a;
+				red   = (img_red[sx][sy]   * z) / alpha;
+				green = (img_green[sx][sy] * z) / alpha;
+				blue  = (img_blue[sx][sy]  * z) / alpha;
+				if (red   > 255) red   = 255;
+				if (green > 255) green = 255;
+				if (blue  > 255) blue  = 255;
+			}
+			ctx_img.data[off++] = red;
+			ctx_img.data[off++] = green;
+			ctx_img.data[off++] = blue;
+			ctx_img.data[off++] = 255;
+		}
+	}
+	ctx.putImageData(ctx_img, 0, 0);
+}
 
 function updateHistogram()
 {
@@ -757,9 +525,6 @@ function init()
 {
 	yimlen = canvas.height;
 	ximlen = canvas.height;
-
-	half_ximlen = ximlen / 2;
-	half_yimlen = yimlen / 2;
 
 	CameraMatrix = matrix(3, 3, 0.0);
 	IrotX = matrix(3, 3, 0.0);
@@ -872,6 +637,7 @@ function main()
 
 	$("colorPalette").onchange = function() {
 		pallet = palettes[$("colorPalette").value];
+		updateHashTag();
 		reset = 1;
 	}
 
@@ -884,6 +650,7 @@ function main()
 
 	$("iterationsInput").onchange = function() {
 		iterations = parseInt($("iterationsInput").value);
+		updateHashTag();
 		reset = 1;
 	}
 
@@ -935,6 +702,8 @@ function main()
 	$('canvasControls').onmouseup = function(e)
 	{
 		console.log("mouse up!");
+		const half_ximlen = ximlen / 2;
+		const half_yimlen = yimlen / 2;
 
 		// clear entire canvas
 		var c = ccanvas.getContext('2d');
@@ -979,7 +748,11 @@ function main()
 	readHashTag();
 	setZoom(zoom);
 	init();
-	draw(true);
+	updateHashTag();
+	// Quick 1/4-resolution preview pass, pause 10 s, then start the full render.
+	renderPreview(function() {
+		setTimeout(function() { clearScreenAndReset(); draw(true); }, 10000);
+	});
 }
 
 main();
@@ -1068,6 +841,20 @@ function readHashTag()
 				console.log("readHashTag() formula : " + formula);
 				break;
 			}
+			case 'iterations': {
+				iterations = parseInt(val);
+				$("iterationsInput").value = iterations;
+				console.log("readHashTag() iterations : " + iterations);
+				break;
+			}
+			case 'palette': {
+				if (palettes[val]) {
+					pallet = palettes[val];
+					$("colorPalette").value = val;
+					console.log("readHashTag() palette : " + val);
+				}
+				break;
+			}
 		}
 	}
 }
@@ -1082,7 +869,7 @@ function updateHashTag()
 	$("zoomInput").value = zoom;
 	$("xcenInput").value = xcen;
 	$("ycenInput").value = ycen;
-	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula;
+	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + $("colorPalette").value;
 }
 
 // file:///C:/devel/mandelbrot-js/mandelbulb.html#zoom=2.9&xcen=1.1019999999999999&ycen=-0.17883333333333334&contrast=0.5&brightness=1.8&fog=0.01&primary_light=38&power=2&dof=0&focus=-0.15&yaw=-0.8&pitch=0.1&azimuth=-1&formula=1
