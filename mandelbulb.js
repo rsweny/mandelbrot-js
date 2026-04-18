@@ -58,11 +58,14 @@ var ycen = 0.0;
 var cameraPersp = -0.1;
 var cameraYaw = 0.1;
 var cameraPitch = 0.75;
+
 var cameraDOF = 0.0;
-var factorDOF = 0.0;
 var focus_depth = 1.0;
+var focus = -0.15; // higher values for further distance in focus.
+const FOCUS_WINDOW = 0.2 // 20% of depth of field is in focus
+
 var opacity = 1.4;
-var focus = -0.15; //higher values for further distance in focus.
+
 
 // data
 var root_zoom;
@@ -91,10 +94,13 @@ var visiblePixels, allPixels, rayPoints;
 var renderpass = 0;
 var max_alpha = 1;
 
-// worker pool (web workers for parallel scanline rendering)
+// worker pool (web workers, used as fallback when WebGPU is unavailable)
 var workerPool = [];
 var workerGen   = 0;   // incremented on each restart; stale results are discarded
 var renderY     = 0;   // next row to dispatch
+
+// GPU renderer state. Populated by initGPURenderer() during startup.
+var useGPU = false;
 
 // Build a Blob URL from the inert <script type="text/mandelbulb-worker"> block so that
 // workers load correctly on file:// origins (no HTTP server required).
@@ -137,7 +143,7 @@ function updateMinMaxY()
 			}
 		}
 	}
-	focus_depth = (max_y - min_y) * 0.33;
+	focus_depth = (max_y - min_y) * FOCUS_WINDOW;
 	console.log(focus_depth + " Y Bounds: " + min_y + " to " + max_y);
 }
 	
@@ -222,7 +228,7 @@ function generateConfig() {
 		stepDetail: stepDetail, frost: frost,
 		root_zoom: root_zoom, opacity: opacity,
 		focus: focus, focus_depth: focus_depth,
-		cameraDOF: cameraDOF, factorDOF: factorDOF,
+		cameraDOF: cameraDOF, factorDOF: cameraDOF * (ximlen / 3),
 		LightVector: LightVector, RAY_STEPS: RAY_STEPS,
 		AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
 		shadow_darkness: shadow_darkness, HORIZON: HORIZON,
@@ -233,9 +239,61 @@ function generateConfig() {
 	};
 }
 
+// Snapshot of all globals the WebGPU renderer reads each frame. Any global
+// update (camera, palette, iterations, etc.) is picked up here; setting
+// reset = 1 drains the accumulators before the next frame is encoded.
+function gpuStateFn() {
+	if (reset === 1) {
+		reset = 0;
+		resetGPURender(HORIZON);
+	} else if (reset === 2) {
+		reset = 0;
+	}
+	var passIdx = getGPUPassIndex();
+	return {
+		ximlen: ximlen, yimlen: yimlen,
+		half_ximlen: ximlen / 2, half_yimlen: yimlen / 2,
+		zoom: zoom, xcen: xcen, ycen: ycen,
+		cameraPersp: cameraPersp,
+		iterations: iterations, formula: formula, azimuth: azimuth, power: power,
+		stepDetail: stepDetail, frost: frost,
+		root_zoom: root_zoom, opacity: opacity,
+		focus: focus, focus_depth: focus_depth,
+		cameraDOF: cameraDOF, factorDOF: cameraDOF * (ximlen / 3),
+		LightVector: LightVector, RAY_STEPS: RAY_STEPS,
+		AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
+		shadow_darkness: shadow_darkness, HORIZON: HORIZON,
+		ray_step: ray_step,
+		CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
+		fog_factor: fog_factor, fog_color: fog_color,
+		pallet: pallet,
+		gradient: gradient, brightness: brightness, drawFocus: drawFocus,
+		// Pass 0 is the rough depth-finder (frost/fog disabled via min_y == -2.0).
+		// Subsequent passes use the bulb's ~|p|<=1.5 bounding box; refinement
+		// beyond that would require reading occlusion back from the GPU.
+		min_y: (passIdx === 0 ? -2.0 : -1.8),
+		max_y: (passIdx === 0 ?  2.0 :  1.8)
+	};
+}
+
+function gpuStatsCallback(s) {
+	renderpass = s.pass
+	if (typeof s.max_alpha === 'number') {
+		max_alpha = Math.pow(Math.max(s.max_alpha, 1.0), gradient);
+	}
+	const completeness = Math.round(max_alpha*100)/100.0;
+	$('renderTime').innerHTML = s.elapsedSec.toFixed(1) + " pass: " + s.pass + " (" + completeness + ")";
+	$('renderSpeed').innerHTML = Math.round(s.pixelsPerSec/1000) + "k px/sec";
+}
+
 function render(startScanning)
 {
 	if (!startScanning) return;  // workers handle reset signals themselves
+
+	if (useGPU) {
+		startGPURender(gpuStateFn, gpuStatsCallback);
+		return;
+	}
 
 	var start      = (new Date).getTime();
 	var lastUpdate = start;
@@ -324,9 +382,12 @@ function render(startScanning)
 				reset = 0;
 				workerPool.forEach(function(w) { w.terminate(); });
 				workerPool = [];
-				renderPreview(function() {
-					setTimeout(function() { clearScreenAndReset(); render(true); }, 5000);
-				});
+
+				// TODO fix this
+				// renderPreview(function() {
+				// 	setTimeout(function() { clearScreenAndReset(); render(true); }, 5000);
+				// });
+
 				return;
 			}
 			if (reset === 2) {
@@ -432,7 +493,7 @@ function init()
 
 function main()
 {
-	$('viewPNG').onclick = function(_e)
+	$('savePNG').onclick = function(_e)
 	{
 		var link = document.createElement('a');
 		link.download = 'mandelbulb-' + renderpass + '-' + max_alpha + '.png';
@@ -494,20 +555,19 @@ function main()
 		fog_color.b = parseInt(hex.slice(5,7), 16);
 	}
 
-	$("power").onchange = function() {
+	$("power").onkeyup = function() {
 		power = parseFloat($("power").value);
 		updateHashTag();
 		reset = 1;
 	}
 
-	$("DOF").onchange = function() {
+	$("DOF").onkeyup = function() {
 		cameraDOF = parseFloat($("DOF").value);
-		factorDOF = cameraDOF * (ximlen/3);
 		updateHashTag();
 		drawFocus = true;
 	}
 
-	$("focus").onchange = function() {
+	$("focus").onkeyup = function() {
 		focus = parseFloat($("focus").value);
 		updateHashTag();
 		drawFocus = true;
@@ -532,6 +592,7 @@ function main()
 	$("colorPalette").onchange = function() {
 		pallet = palettes[$("colorPalette").value];
 		updateHashTag();
+		markGPUPaletteDirty();
 		reset = 1;
 	}
 
@@ -542,7 +603,7 @@ function main()
 		draw(false);
 	}
 
-	$("iterationsInput").onchange = function() {
+	$("iterationsInput").onkeyup = function() {
 		iterations = parseInt($("iterationsInput").value);
 		updateHashTag();
 		reset = 1;
@@ -643,9 +704,26 @@ function main()
 	setZoom(zoom);
 	init();
 	updateHashTag();
-	// GPU preview pass, pause 10 s, then start the full CPU render.
+
+	// Fragment-shader GPU preview first, then kick off the WebGPU progressive
+	// renderer once it has finished initialising. If WebGPU is unavailable we
+	// fall back to the web-worker CPU renderer on a longer warm-up timer.
 	renderPreview(function() {
-		setTimeout(function() { clearScreenAndReset(); draw(true); }, 10000);
+		if (isWebGPUSupported()) {
+			initGPURenderer(canvas, canvas.width, canvas.height).then(function(g) {
+				if (g) {
+					useGPU = true;
+					setTimeout(function() { clearScreenAndReset(); draw(true); }, 4000);
+				} else {
+					setTimeout(function() { clearScreenAndReset(); draw(true); }, 9000);
+				}
+			}).catch(function(err) {
+				console.warn("WebGPU init failed, falling back to workers:", err);
+				setTimeout(function() { clearScreenAndReset(); draw(true); }, 9000);
+			});
+		} else {
+			setTimeout(function() { clearScreenAndReset(); draw(true); }, 9000);
+		}
 	});
 }
 
@@ -700,7 +778,6 @@ function readHashTag()
 			}
 			case 'dof': {
 				cameraDOF = parseFloat(val);
-				factorDOF = cameraDOF * (ximlen/3);
 				$("DOF").value = cameraDOF;
 				console.log("readHashTag() dof : " + cameraDOF);
 				break;
@@ -753,7 +830,6 @@ function readHashTag()
 	}
 }
 
-
 /*
  * Update URL's hash with render parameters so we can pass it around.
  */
@@ -765,6 +841,3 @@ function updateHashTag()
 	$("ycenInput").value = ycen;
 	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + $("colorPalette").value;
 }
-
-// file:///C:/devel/mandelbrot-js/mandelbulb.html#zoom=2.9&xcen=1.1019999999999999&ycen=-0.17883333333333334&contrast=0.5&brightness=1.8&fog=0.01&primary_light=38&power=2&dof=0&focus=-0.15&yaw=-0.8&pitch=0.1&azimuth=-1&formula=1
-// file:///C:/devel/mandelbrot-js/mandelbulb.html#zoom=0.6673544444444444&xcen=-0.02137944444444445&ycen=0.9455127777777776&contrast=1.08&brightness=2.62&fog=0.51&primary_light=28&power=3&dof=0&focus=-0.15&yaw=0.1&pitch=0.75&azimuth=-1&formula=1
