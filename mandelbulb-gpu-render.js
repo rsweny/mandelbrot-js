@@ -15,8 +15,6 @@
 // ---------- WGSL ----------
 
 var GPU_RENDER_WGSL = `
-const MAX_ITER: u32        = 200u;
-const MAX_RAY_STEPS: u32   = 256u;
 const MAX_DEPTH_STEPS: u32 = 1024u;
 const MAX_GOODPOINTS: u32  = 5u;
 
@@ -36,6 +34,7 @@ struct Params {
     ray_step: f32, stepDetail: f32, root_zoom: f32, opacity: f32,
     frost: f32, fog_factor: f32, cameraDOF: f32, factorDOF: f32,
     focus: f32, focus_depth: f32, min_y: f32, max_y: f32,
+    useVolumetricFog: u32, _pad0: u32, _pad1: u32, _pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -83,8 +82,7 @@ fn insideFractal(c: vec3<f32>) -> InsideResult {
     var r: f32 = 0.0;
     let pwr = P.power; let az = P.azimuth;
     let formula = P.formula; let maxIter = P.iterations;
-    for (var i: u32 = 0u; i < MAX_ITER; i = i + 1u) {
-        if (i >= maxIter) { break; }
+    for (var i: u32 = 0u; i < maxIter; i = i + 1u) {
         r = length(p);
         let theta_p = atan2(p.y, p.x) * pwr;
         let r_p = pow(r, pwr);
@@ -120,16 +118,16 @@ fn pushGP(gp: ptr<function, GoodPoints>, p: vec3<f32>, color: f32) {
 }
 
 // March a ray; on solid hit returns 0 and (optionally) records a goodPoint.
-fn calcRayGP(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32,
-             fuzzy: f32, gp: ptr<function, GoodPoints>) -> f32 {
+fn calcRayGP(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32, fuzzy: f32, gp: ptr<function, GoodPoints>) -> f32 {
     let s = step * fuzzy;
     var p = start;
-    for (var i: u32 = 1u; i < MAX_RAY_STEPS; i = i + 1u) {
-        if (i >= steps) { break; }
+    for (var i: u32 = 1u; i < steps; i = i + 1u) {
         p = p + s * f32(i);
         let r = insideFractal(p);
         if (r.iter == P.iterations) { pushGP(gp, p, r.color); return 0.0; }
-        if (r.iter < 3u) { break; }
+
+        // ray has left the general area of the solid, stop tracing.
+        if (r.iter < 4u) { break; }
     }
     return bright;
 }
@@ -137,11 +135,13 @@ fn calcRayGP(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32,
 fn calcRay(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32, fuzzy: f32) -> f32 {
     let s = step * fuzzy;
     var p = start;
-    for (var i: u32 = 1u; i < MAX_RAY_STEPS; i = i + 1u) {
-        if (i >= steps) { break; }
+    for (var i: u32 = 1u; i < steps; i = i + 1u) {
         p = p + s * f32(i);
         let r = insideFractal(p);
         if (r.iter == P.iterations) { return 0.0; }
+
+        // ray has left the general area of the solid, stop tracing
+        // (go a bit further out here to make volume lighting look good)
         if (r.iter < 3u) { break; }
     }
     return bright;
@@ -174,6 +174,15 @@ fn calcRaysSimple(p: vec3<f32>, fuzzy: f32, rng: ptr<function, u32>) -> f32 {
     lf = lf + calcRay(p, P.RAY_STEPS,      vec3<f32>( n0, -n1, -rs),                                    P.AMBIENT_LIGHT, fuzzy);
     lf = lf + calcRay(p, P.RAY_STEPS,      vec3<f32>(n0*lv.x*9.0, n1*lv.y*9.0, n2*lv.z*9.0),            P.AMBIENT_LIGHT, fuzzy);
     lf = lf + calcRay(p, P.RAY_STEPS*4u,   vec3<f32>(rs*lv.x, rs*lv.y, rs*lv.z),                        P.primary_light, fuzzy);
+    return lf;
+}
+
+// Mirrors calcVolumetricRays in the worker: primary-light ray only, no
+// ambient neighbours. Used to tint fog traces for volumetric lighting
+fn calcVolumetricRays(p: vec3<f32>, fuzzy: f32) -> f32 {
+    let rs = P.ray_step*5;
+    let lv = P.LightVector.xyz;
+    var lf: f32 = 0.05 + calcRay(p, P.RAY_STEPS*3u, vec3<f32>(rs*lv.x, rs*lv.y, rs*lv.z), P.primary_light, fuzzy)*0.035;
     return lf;
 }
 
@@ -260,13 +269,15 @@ fn plotFog(fp: vec3<f32>, factor: f32, rng: ptr<function, u32>) {
 
 // Streaming fog: re-run the iteration and plot each trace point as we go,
 // avoiding the need to store a per-pixel trace history in private memory.
-fn fogTrace(c: vec3<f32>, factor: f32, rng: ptr<function, u32>) {
+// When volumetric fog is enabled, each sample gets its own primary-light
+// shadow factor (mirroring the CPU for (c=0; c<iter; c++) loop).
+// unlike CPU this traces all points, rather than just those that escape the set
+fn fogTrace(c: vec3<f32>, factor: f32, fuzzy: f32, rng: ptr<function, u32>) {
     var p = c;
     var r: f32 = 0.0;
     let pwr = P.power; let az = P.azimuth;
     let formula = P.formula; let maxIter = P.iterations;
-    for (var i: u32 = 0u; i < MAX_ITER; i = i + 1u) {
-        if (i >= maxIter) { break; }
+    for (var i: u32 = 0u; i < maxIter; i = i + 1u) {
         r = length(p);
         let theta_p = atan2(p.y, p.x) * pwr;
         let r_p = pow(r, pwr);
@@ -283,8 +294,28 @@ fn fogTrace(c: vec3<f32>, factor: f32, rng: ptr<function, u32>) {
             let cp = cos(phi * pwr);
             p = vec3<f32>(r_p*ct*ps, r_p*st*ps, r_p*cp*az) + c;
         }
-        plotFog(p, factor, rng);
+
         if (r >= 8.0) { break; }
+
+        var volumetricLightFactor: f32 = 1.0;
+        if (P.useVolumetricFog != 0u) {
+            
+            // fade out the fog close to the camera unless user prefers intense fog
+            if (factor < 1) {
+                let sp = reversePoint(p);
+                let fogFadeout = 0.23 + fuzzy*0.1; // 0.0 = near, 1.0 = far
+                let minFogDepth = mix(P.min_y, P.max_y, fogFadeout); 
+                if (sp.y < minFogDepth) {
+                    continue;
+                }
+            }
+
+            // calc volume lighting
+            volumetricLightFactor = calcVolumetricRays(p, fuzzy);
+        }
+
+        let fogGlowFactor = factor * volumetricLightFactor;
+        plotFog(p, fogGlowFactor, rng); 
     }
 }
 
@@ -360,8 +391,11 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             stepAmount = (P.stepDetail + rnd * P.stepDetail) *
                          (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
                          P.root_zoom * 0.5;
+
+            // y > P.max_y*0.01 && y < P.max_y*0.99 &&
             if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {
-                fogTrace(p3, P.fog_factor, &rng);
+                let fogFuzzy = max(P.opacity * nextRand(&rng), 0.4);
+                fogTrace(p3, P.fog_factor, fogFuzzy, &rng);
             }
         }
         y = y + stepAmount;
@@ -494,7 +528,7 @@ var GPU_INTERPASS_SLEEP_MS = 100;  // idle gap between passes to ease GPU load
 const GPU_TILE_PIXELS    = 256;
 const GPU_TILES_PER_AWAIT = 8;
 
-const GPU_PARAMS_BYTES = 304;
+const GPU_PARAMS_BYTES = 320;
 const GPU_TONE_BYTES   = 32;
 const GPU_CLEAR_BYTES  = 16;
 const GPU_SNAP_BYTES   = 16;
@@ -664,6 +698,8 @@ function writeGPUParams(s, passSeed) {
     f[64] = s.ray_step;      f[65] = s.stepDetail;     f[66] = s.root_zoom;       f[67] = s.opacity;
     f[68] = s.frost;         f[69] = s.fog_factor;     f[70] = s.cameraDOF;       f[71] = s.factorDOF;
     f[72] = s.focus;         f[73] = s.focus_depth;    f[74] = s.min_y;           f[75] = s.max_y;
+    // useVolumetricFog + 3 padding u32s (slots 77..79) keep the struct 16-byte aligned.
+    u[76] = s.useVolumetricFog ? 1 : 0; u[77] = 0; u[78] = 0; u[79] = 0;
     _gpu.device.queue.writeBuffer(_gpu.paramsBuf, 0, _gpu.paramsBytes);
 }
 

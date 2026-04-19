@@ -38,6 +38,7 @@ var HORIZON = 20;
 // fog based on path traces
 var fog_factor = 0.01;
 var fog_color = {r: 250, g: 250, b: 250};
+var useVolumetricFog = false;
 var min_y, max_y;
 
 // formula variation
@@ -235,8 +236,20 @@ function generateConfig() {
 		ray_step: ray_step,
 		CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
 		fog_factor: fog_factor, fog_color: fog_color,
+		useVolumetricFog: useVolumetricFog,
 		pallet: pallet
 	};
+}
+
+// Push the latest config to every worker so non-reset controls (fog, focus,
+// DOF, primary light, etc.) take effect on the next dispatched row without
+// terminating and re-initialising the pool.
+function broadcastConfig() {
+	if (workerPool.length === 0) return;
+	var config = generateConfig();
+	workerPool.forEach(function(w) {
+		w.postMessage({ type: 'configUpdate', config: config });
+	});
 }
 
 // Snapshot of all globals the WebGPU renderer reads each frame. Any global
@@ -245,7 +258,17 @@ function generateConfig() {
 function gpuStateFn() {
 	if (reset === 1) {
 		reset = 0;
-		resetGPURender(HORIZON);
+		// Stop the progressive render, paint the WebGL preview onto the main
+		// canvas, then restart the GPU loop. Returning null aborts this frame before any blit
+		// so the preview isn't overwritten.
+		stopGPURender();
+		renderPreview(function() {
+			setTimeout(function() {
+				clearScreenAndReset();
+				startGPURender(gpuStateFn, gpuStatsCallback);
+			}, 6000);
+		});
+		return null;
 	} else if (reset === 2) {
 		reset = 0;
 	}
@@ -266,6 +289,7 @@ function gpuStateFn() {
 		ray_step: ray_step,
 		CameraMatrix: CameraMatrix, IrotX: IrotX, IrotZ: IrotZ,
 		fog_factor: fog_factor, fog_color: fog_color,
+		useVolumetricFog: useVolumetricFog,
 		pallet: pallet,
 		gradient: gradient, brightness: brightness, drawFocus: drawFocus,
 		// Pass 0 is the rough depth-finder (frost/fog disabled via min_y == -2.0).
@@ -382,12 +406,9 @@ function render(startScanning)
 				reset = 0;
 				workerPool.forEach(function(w) { w.terminate(); });
 				workerPool = [];
-
-				// TODO fix this
-				// renderPreview(function() {
-				// 	setTimeout(function() { clearScreenAndReset(); render(true); }, 5000);
-				// });
-
+				renderPreview(function() {
+				 	setTimeout(function() { clearScreenAndReset(); render(true); }, 9000);
+				});
 				return;
 			}
 			if (reset === 2) {
@@ -523,29 +544,33 @@ function main()
 	}
 
 	$("contrastSlider").onchange = function() {
-		gradient =  $("contrastSlider").value / 100.0; 
+		gradient =  $("contrastSlider").value / 100.0;
 		updateHistogram();
 		updateHashTag();
 		console.log("gradient: " + gradient);
 		m_down = false;
+		broadcastConfig();
 	}
 
 	$("brightnessSlider").onchange = function() {
-		brightness =  $("brightnessSlider").value / 100.0; 
+		brightness =  $("brightnessSlider").value / 100.0;
 		updateHistogram();
 		updateHashTag();
 		console.log("brightness: " + brightness);
 		m_down = false;
+		broadcastConfig();
 	}
 
 	$("primary_light").onchange = function() {
 		primary_light = parseFloat($("primary_light").value);
 		updateHashTag();
+		broadcastConfig();
 	}
 
 	$("fog").onchange = function() {
 		fog_factor = parseFloat($("fog").value);
 		updateHashTag();
+		broadcastConfig();
 	}
 
 	$("fogColor").oninput = function() {
@@ -553,6 +578,12 @@ function main()
 		fog_color.r = parseInt(hex.slice(1,3), 16);
 		fog_color.g = parseInt(hex.slice(3,5), 16);
 		fog_color.b = parseInt(hex.slice(5,7), 16);
+		broadcastConfig();
+	}
+
+	$("volumetricFog").onchange = function() {
+		useVolumetricFog = $("volumetricFog").checked;
+		broadcastConfig();
 	}
 
 	$("power").onkeyup = function() {
@@ -565,12 +596,14 @@ function main()
 		cameraDOF = parseFloat($("DOF").value);
 		updateHashTag();
 		drawFocus = true;
+		broadcastConfig();
 	}
 
 	$("focus").onkeyup = function() {
 		focus = parseFloat($("focus").value);
 		updateHashTag();
 		drawFocus = true;
+		broadcastConfig();
 	}
 
 	$("cameraYaw").onchange = function() {
@@ -604,7 +637,7 @@ function main()
 	}
 
 	$("iterationsInput").onkeyup = function() {
-		iterations = parseInt($("iterationsInput").value);
+		iterations = Math.min(50,parseInt($("iterationsInput").value));
 		updateHashTag();
 		reset = 1;
 	}
@@ -708,8 +741,10 @@ function main()
 	// Fragment-shader GPU preview first, then kick off the WebGPU progressive
 	// renderer once it has finished initialising. If WebGPU is unavailable we
 	// fall back to the web-worker CPU renderer on a longer warm-up timer.
+	// Firefox's WebGPU implementation is skipped; use the worker path instead.
+	var isFirefox = navigator.userAgent.indexOf("Firefox") !== -1;
 	renderPreview(function() {
-		if (isWebGPUSupported()) {
+		if (!isFirefox && isWebGPUSupported()) {
 			initGPURenderer(canvas, canvas.width, canvas.height).then(function(g) {
 				if (g) {
 					useGPU = true;

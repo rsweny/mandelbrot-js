@@ -209,6 +209,11 @@
         <td><input id="fogColor" type="color" value="#fafafa"/></td>
         </tr>
 
+        <tr>
+        <td>Volumetric Fog</td>
+        <td><input id="volumetricFog" type="checkbox" /></td>
+        </tr>
+
 
         <tr>
         <td>Color Palette</td>
@@ -410,6 +415,16 @@ function calculateRays(origPoint, rndFuzzy, goodPoints) {
     return light_factor;
 }
 
+function calcVolumetricRays(origPoint, fuzzy) {
+    const rs = cfg.ray_step*4;
+    const lv = cfg.LightVector;
+
+    //direct light
+    let light_factor = 0.1 + calculateRay(origPoint, cfg.RAY_STEPS*5, rs*lv[0], rs*lv[1], rs*lv[2], cfg.primary_light, fuzzy, null)*0.035;
+
+    return light_factor;
+}
+
 function reversePoint(fracPoint) {
     var p = [0, 0, 0, fracPoint[3], fracPoint[4]];
     rotateVector(p, cfg.IrotZ, fracPoint[0], fracPoint[1], fracPoint[2]);
@@ -503,7 +518,7 @@ function computeRow(yRow, min_y, max_y) {
 
                 // plot pixel
                 var goodPoints = [];
-                var rndFuzzy = Math.max(cfg.opacity * Math.random(), 0.4);
+                const rndFuzzy = Math.max(cfg.opacity * Math.random(), 0.4);
                 var light_factor = 1.0 + calculateRays(point3D, rndFuzzy, goodPoints);
                 plotPixel(x, yRow, y, color, light_factor, pw);
                 vis++;
@@ -551,8 +566,11 @@ function computeRow(yRow, min_y, max_y) {
                 // for points not in the set, optionally plot traces that act as a fog / glow
                 if (cfg.fog_factor > 0 && rnd > 0.9 && iter > 1) {
                     var fc = cfg.fog_color;
+                    const fogFuzzy = Math.max(cfg.opacity * Math.random(), 0.4);
                     for (var c = 0; c < iter; c++) {
-                        plotFogPixel(trace_history[c], cfg.fog_factor, fc.r, fc.g, fc.b, pw);
+                      const volumetricLightFactor = cfg.useVolumetricFog ? calcVolumetricRays(trace_history[c], fogFuzzy) : 1;
+                      const fogGlowFactor = cfg.fog_factor * volumetricLightFactor;
+                      plotFogPixel(trace_history[c], fogGlowFactor, fc.r, fc.g, fc.b, pw);
                     }
                 }
             }
@@ -573,6 +591,8 @@ self.onmessage = function(e) {
     if (msg.type === 'init') {
         cfg = msg.config;
         occSnap = new Float32Array(cfg.ximlen * cfg.yimlen);  // start with all-zero snapshot
+    } else if (msg.type === 'configUpdate') {
+        cfg = msg.config;  // live update from non-reset controls; applied before the next compute
     } else if (msg.type === 'occlusion') {
         occSnap = msg.data;  // updated snapshot from main thread (every 50 passes)
     } else if (msg.type === 'compute') {
