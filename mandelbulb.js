@@ -36,7 +36,7 @@ var shadow_darkness = 30.0;
 var HORIZON = 20;
 
 // fog based on path traces
-var fog_factor = 0.01;
+var fog_factor = 0.0;
 var fog_color = {r: 250, g: 250, b: 250};
 var useVolumetricFog = false;
 var min_y, max_y;
@@ -56,7 +56,7 @@ var brightness = 1.8;
 var zoom = 3.0;
 var xcen = 0.0;
 var ycen = 0.0;
-var cameraPersp = -0.1;
+var cameraPersp = 0.0;
 var cameraYaw = 0.1;
 var cameraPitch = 0.75;
 
@@ -266,7 +266,7 @@ function gpuStateFn() {
 			setTimeout(function() {
 				clearScreenAndReset();
 				startGPURender(gpuStateFn, gpuStatsCallback);
-			}, 6000);
+			}, 4000);
 		});
 		return null;
 	} else if (reset === 2) {
@@ -636,8 +636,8 @@ function main()
 		draw(false);
 	}
 
-	$("iterationsInput").onkeyup = function() {
-		iterations = Math.min(50,parseInt($("iterationsInput").value));
+	$("iterationsInput").onchange = function() {
+		iterations = Math.min(100, parseInt($("iterationsInput").value));
 		updateHashTag();
 		reset = 1;
 	}

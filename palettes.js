@@ -701,39 +701,25 @@ palettes["Warm Gold"] =
  [183, 80, 92], [182, 85, 99], [147, 89, 91], [142, 81, 93],
 ];
 
-// HSB spectral bands (ported from Pallet.java assignBands, rnd=0.59, split=8)
+// HSB spectral bands
 (function() {
-	var rnd = 0.59;
-	var pal = new Array(256);
-	for (var cur = 0; cur < 8; cur++) {
-		var place = 32 * cur;
-		for (var i = 0; i < 256; i += 8) {
-			var hue, sat;
-			if (i <= 60) {
-				hue = i / 420.0;
-				sat = (i / 60.0) * 0.2 + 0.8;
-			} else if (i <= 120) {
-				hue = i / 500.0;
-				sat = (120 - i) / 60.0;
-			} else if (i <= 220) {
-				hue = (i + 20) / 420.0;
-				sat = 0;
-			} else {
-				hue = (i + 10) / 420.0;
-				sat = (220 - i) / 36.0;
-			}
-			pal[place + i / 8] = hsvToRgb(hue + rnd, sat / 2.0, 1.0 - sat / 4.0);
-		}
+	const rnd = Math.random();
+	const rnd2 = Math.random();
+	const pal = new Array(256);
+	for (var i = 0; i < 256; i++) {
+		const hue = (3.5+rnd)*i / 320.0;
+		const sat = Math.abs(120 - i/2) / 220.0;
+		pal[i] = hsvToRgb(hue + rnd2, sat, Math.max(0.4,Math.abs(2 - hue)));
 	}
 	palettes["Spectral"] = pal;
 })();
 
-// HSB rainbow (ported from Pallet.java fpalette[11], rnd=0.59)
+// HSB rainbow
 (function() {
-	var rnd = 0.59;
-	var pal = new Array(256);
+	const rnd = Math.random();
+	const pal = new Array(256);
 	for (var i = 0; i < 256; i++) {
-		var hue = i / 395.0;
+		var hue = i / 150.0;
 		var sat = i / 260.0;
 		pal[i] = hsvToRgb(hue + rnd, sat, 0.9);
 	}

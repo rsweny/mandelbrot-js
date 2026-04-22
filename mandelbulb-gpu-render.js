@@ -142,7 +142,7 @@ fn calcRay(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32, fuzzy: f3
 
         // ray has left the general area of the solid, stop tracing
         // (go a bit further out here to make volume lighting look good)
-        if (r.iter < 3u) { break; }
+        if (r.iter < 2u) { break; }
     }
     return bright;
 }
@@ -277,7 +277,7 @@ fn fogTrace(c: vec3<f32>, factor: f32, fuzzy: f32, rng: ptr<function, u32>) {
     var r: f32 = 0.0;
     let pwr = P.power; let az = P.azimuth;
     let formula = P.formula; let maxIter = P.iterations;
-    for (var i: u32 = 0u; i < maxIter; i = i + 1u) {
+    for (var i: u32 = 0u; i < 20u; i = i + 1u) {
         r = length(p);
         let theta_p = atan2(p.y, p.x) * pwr;
         let r_p = pow(r, pwr);
@@ -297,25 +297,28 @@ fn fogTrace(c: vec3<f32>, factor: f32, fuzzy: f32, rng: ptr<function, u32>) {
 
         if (r >= 8.0) { break; }
 
-        var volumetricLightFactor: f32 = 1.0;
-        if (P.useVolumetricFog != 0u) {
-            
-            // fade out the fog close to the camera unless user prefers intense fog
-            if (factor < 1) {
-                let sp = reversePoint(p);
-                let fogFadeout = 0.23 + fuzzy*0.1; // 0.0 = near, 1.0 = far
-                let minFogDepth = mix(P.min_y, P.max_y, fogFadeout); 
-                if (sp.y < minFogDepth) {
-                    continue;
+        // glow spikes fog for even iterations
+        if (i > 0u || maxIter % 2 == 0) {
+            var volumetricLightFactor: f32 = 1.0;
+            if (P.useVolumetricFog != 0u) {
+                
+                // fade out the fog close to the camera unless user prefers intense fog
+                if (factor < 1) {
+                    let sp = reversePoint(p);
+                    let fogFadeout = 0.23 + fuzzy*0.1; // 0.0 = near, 1.0 = far
+                    let minFogDepth = mix(P.min_y, P.max_y, fogFadeout); 
+                    if (sp.y < minFogDepth) {
+                        continue;
+                    }
                 }
+
+                // calc volume lighting
+                volumetricLightFactor = calcVolumetricRays(p, fuzzy);
             }
 
-            // calc volume lighting
-            volumetricLightFactor = calcVolumetricRays(p, fuzzy);
+            let fogGlowFactor = factor * volumetricLightFactor;
+            plotFog(p, fogGlowFactor, rng); 
         }
-
-        let fogGlowFactor = factor * volumetricLightFactor;
-        plotFog(p, fogGlowFactor, rng); 
     }
 }
 
@@ -353,6 +356,8 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r = insideFractal(p3);
 
         if (r.iter == P.iterations) {
+
+            // point is in set so plot solid pixel
             let fuzzy = max(P.opacity * nextRand(&rng), 0.4);
             var gp: GoodPoints;
             gp.cnt = 0u;
@@ -387,12 +392,14 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             break;
         } else if (P.min_y != -2.0) {
+            // point is not in set (and we have done a rough pass to generate the rough occlusions)
+            // use much smaller and more accurate stepAmount
             let rnd = nextRand(&rng);
             stepAmount = (P.stepDetail + rnd * P.stepDetail) *
                          (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
                          P.root_zoom * 0.5;
 
-            // y > P.max_y*0.01 && y < P.max_y*0.99 &&
+            // and for points not in the set, optionally plot traces that act as a fog / glow
             if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {
                 let fogFuzzy = max(P.opacity * nextRand(&rng), 0.4);
                 fogTrace(p3, P.fog_factor, fogFuzzy, &rng);
