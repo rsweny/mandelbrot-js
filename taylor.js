@@ -282,6 +282,8 @@ function computePixel(xi, yi) {
       var y = Complex.pow(value, 0.5).abs();
       var m = Complex.pow(value, 0.9).abs();
 
+      // m = 1 + m - Math.log(m)/Math.log(2.0);
+
       if (xavg === 0) { xavg = x; yavg = y; mavg = m; }
 
       var xdev = Math.abs(x - xavg);
@@ -322,31 +324,22 @@ function nextPoints() {
   var i;
 
   for (i = lasti; i < lasti + points - quad; i += quad) {
-    var xi, yi;
-
-    if (i >= totalPixels) {
-      // Random anti-aliasing pass
-      xi = Math.floor(Math.random() * ximlen);
-      yi = Math.floor(Math.random() * yimlen);
-    } else {
-      xi = i % ximlen;
-      yi = Math.floor(i / ximlen);
-    }
-
-    var rgb = computePixel(xi, yi);
-    var idx  = yi * ximlen + xi;
+    const xi = i % ximlen;
+    const yi = Math.floor(i / ximlen);
+    const rgb = computePixel(xi, yi);
+    const idx = yi * ximlen + xi;
 
     img_red[idx]   += rgb[0];
     img_green[idx] += rgb[1];
     img_blue[idx]  += rgb[2];
     img_alpha[idx]++;
 
-    var alpha = img_alpha[idx];
-    var r = Math.min(255, img_red[idx]   / alpha) | 0;
-    var g = Math.min(255, img_green[idx] / alpha) | 0;
-    var b = Math.min(255, img_blue[idx]  / alpha) | 0;
+    const alpha = img_alpha[idx];
+    const r = Math.min(255, img_red[idx]   / alpha) | 0;
+    const g = Math.min(255, img_green[idx] / alpha) | 0;
+    const b = Math.min(255, img_blue[idx]  / alpha) | 0;
 
-    var di = idx * 4;
+    const di = idx * 4;
     imageData.data[di]     = r;
     imageData.data[di + 1] = g;
     imageData.data[di + 2] = b;
@@ -364,8 +357,15 @@ function nextPoints() {
     if (lasti % totalPixels === 0) {
       passCount++;
       var diff = ((Date.now() - lastPassTime) / 1000).toFixed(1);
-      updateStatus('Pass: ' + passCount + ' — ' + diff + 's');
       lastPassTime = Date.now();
+      if (passCount >= 1) {
+        running = false;
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        ctx.putImageData(imageData, 0, 0);
+        updateStatus('Done — ' + diff + 's');
+      } else {
+        updateStatus('Pass: ' + passCount + ' — ' + diff + 's');
+      }
     }
   }
 }
@@ -378,7 +378,7 @@ function renderFrame() {
   var batchStart = Date.now();
   do {
     nextPoints();
-  } while (Date.now() - batchStart < 50);
+  } while (running && Date.now() - batchStart < 50);
 
   var now = Date.now();
   if (now - lastUpdateTime > 500) {
@@ -437,38 +437,11 @@ function setupMouse() {
   ccanvas.oncontextmenu = function(e) { e.preventDefault(); };
 
   ccanvas.onmousedown = function(e) {
-    if (e.button === 1) {
-      // Middle click: reset zoom and cycle algorithm
-      xcen = 0; ycen = 0; zoom = 4;
-      compoundPoint = false;
-      $('compoundPoint').checked = false;
-      alg = (alg + 1) % 3;
-      $('algorithm').value = alg;
-      writeControls();
-      draw();
-      return;
-    }
 
     if (e.button === 2) {
-      if (e.ctrlKey) {
-        recurse = !recurse;
-        $('recurse').checked = recurse;
-        draw();
-      } else if (e.shiftKey) {
-        mandelbrot = !mandelbrot;
-        $('mandelbrotMode').checked = mandelbrot;
-        draw();
-      } else {
-        var desc = $('description');
-        desc.style.display = (desc.style.display === 'none') ? 'block' : 'none';
-      }
-      return;
-    }
-
-    if (e.button === 0 && e.ctrlKey) {
-      scalePoint = !scalePoint;
-      $('scalePoint').checked = scalePoint;
-      draw();
+      // right click hide control panel
+      var desc = $('description');
+      desc.style.display = (desc.style.display === 'none') ? 'block' : 'none';
       return;
     }
 
@@ -477,7 +450,9 @@ function setupMouse() {
       cx =  ((e.clientX / ximlen) - 0.5) * 2 * zoom * (ximlen / yimlen) + xcen;
       cy = -((e.clientY / yimlen) - 0.5) * 2 * zoom + ycen;  // y flipped (imaginary axis)
       compoundPoint = true;
+      mandelbrot = true;
       $('compoundPoint').checked = true;
+      $('mandelbrotMode').checked = mandelbrot;
       writeControls();
       draw();
       return;
@@ -494,10 +469,8 @@ function setupMouse() {
       dragBox[3] = e.clientY;
       cctx.clearRect(0, 0, ccanvas.width, ccanvas.height);
       cctx.strokeStyle = '#FF3B03';
-      cctx.lineWidth   = 1;
-      cctx.strokeRect(dragBox[0], dragBox[1],
-                      dragBox[2] - dragBox[0],
-                      dragBox[3] - dragBox[1]);
+      cctx.lineWidth = 1;
+      cctx.strokeRect(dragBox[0], dragBox[1], dragBox[2] - dragBox[0], dragBox[3] - dragBox[1]);
     }
   };
 

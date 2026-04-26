@@ -242,19 +242,19 @@ function calcReal(aa, bb, a, b)
 	}
 	else if (mode == 2)
 	{
-		return aa*aa - Math.sin(bb)*(bb) + Math.atan(a*b);
+		return -aa*aa + bb*bb + a;
 	}
 	else if (mode == 3)
 	{
-		return aa*aa - bb*bb + a;
+		return aa*aa - Math.sin(bb)*(bb) + Math.atan(a*b);
 	}
 	else if (mode == 4)
 	{
-		return Math.sin(aa*aa - bb*bb) + a;
+		return aa*aa - bb*bb + a;
 	}
 	else if (mode == 5)
 	{
-		return -aa*aa + bb*bb + a;
+		return Math.sin(aa*aa - bb*bb) + a;
 	}
 	else if (mode == 6)
 	{
@@ -264,7 +264,7 @@ function calcReal(aa, bb, a, b)
 	{
 		return aa*aa - bb*bb + a;
 	}
-	
+
 }
 
 function calcImg(aa, bb, a, b)
@@ -283,15 +283,15 @@ function calcImg(aa, bb, a, b)
 	}
 	else if (mode == 2)
 	{
-		return 2*aa*bb + b - a;
+		return 2*aa*bb + b;
 	}
 	else if (mode == 3)
 	{
-		return Math.atan(2*aa*bb) + b;
+		return 2*aa*bb + b - a;
 	}
 	else if (mode == 4)
 	{
-		return 2*aa*bb + b;
+		return Math.atan(2*aa*bb) + b;
 	}
 	else if (mode == 5)
 	{
@@ -301,7 +301,7 @@ function calcImg(aa, bb, a, b)
 	{
 		return 2*aa*bb + b;
 	}
-	
+
 }
 
 function calcAllOrbits(Cr, Ci, highlightPoints, i)
@@ -582,6 +582,8 @@ function render()
 }
 
 
+var lastWrittenHash = null;
+
 /*
  * Update URL's hash with render parameters so we can pass it around.
  */
@@ -591,7 +593,7 @@ function updateHashTag()
 
 	console.log("updateHashTag(): " + zoom);
 
-	location.hash = 'zoom=' + zoom + '&' +
+	var h = 'zoom=' + zoom + '&' +
 		'lookAt=' + lookAt + '&' +
 		'contrast=' + gradient + '&' +
 		'brightness=' + brightness + '&' +
@@ -601,6 +603,8 @@ function updateHashTag()
 		'juliax=' + juliax + '&' +
 		'juliay=' + juliay + '&' +
 		'algorithm=' + alg;
+	lastWrittenHash = h;
+	location.hash = h;
 }
 
 // Update small info box in lower right hand side
@@ -619,7 +623,8 @@ function updateInfoBox() {
 function readHashTag()
 {
 	var redraw = false;
-	var tags = location.hash.split('&');
+	var hash = location.hash.replace(/^#/, '');
+	var tags = hash.split('&');
 
 	for ( var i=0; i<tags.length; ++i ) {
 		var tag = tags[i].split('=');
@@ -627,7 +632,7 @@ function readHashTag()
 		var val = tag[1];
 
 		switch ( key ) {
-			case '#zoom': {
+			case 'zoom': {
 				var z = val.split(',');
 				zoom = [parseFloat(z[0]), parseFloat(z[1])];
 				console.log("readHashTag(): " + zoom);
@@ -857,6 +862,13 @@ function main()
 		}
 	}
 
+	$('canvasControls').oncontextmenu = function(e) {
+		e.preventDefault();
+		var d = $('description');
+		d.style.display = (d.style.display == 'none') ? '' : 'none';
+		return false;
+	}
+
 	$('canvasControls').onmousemove = function(e) {
 		if (box != null) {
 			var c = ccanvas.getContext('2d');
@@ -910,6 +922,13 @@ function main()
 			box = null;
 		}
 	}
+
+	// Re-render when the URL hash is edited manually.
+	window.onhashchange = function () {
+		if (location.hash.replace(/^#/, '') === lastWrittenHash) return;
+		if (readHashTag())
+			draw();
+	};
 
 	// Read hash tag and render away at page load.
 	readHashTag();

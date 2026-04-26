@@ -214,13 +214,22 @@
         <tr>
 
         <tr>
-          <td>Supersamples</td>
-          <td><input class="textInput" size="4" type="text" id="superSamples" value="4" /></td>
+          <td>Orbit trap type</td>
+          <td>
+            <select id="orbitType">
+              <option value="-1" selected>None</option>
+              <option value="0">Pinch</option>
+              <option value="1">Pointy Rect</option>
+              <option value="2">Hyperbola</option>
+              <option value="3">Circle</option>
+              <option value="4">Spiral</option>
+            </select>
+          </td>
         </tr>
+
         <tr>
-          <td>Scanline update (ms)</td>
-          <td><input class="textInput" size="4" type="text"
-                id="updateTimeout" value="200" /></td>
+          <td>Supersamples (anti-alias quality)</td>
+          <td><input class="textInput" size="4" type="text" id="superSamples" value="4" /></td>
         </tr>
         <tr>
           <td colspan="2">&nbsp;</td>
@@ -244,7 +253,8 @@
           HTML5 based on Christian Stigen Larsen &mdash;
           <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
           <br/> &nbsp; <br/>
-          Click+drag to zoom in, Shift+click to zoom out. Ctrl-click for orbit traps.
+          Drag to zoom in, shift+click to zoom out.
+          Right-click to hide/show the controls.
           You can change the settings above and hit <i>Draw</i> to render anew.
           <br/>Live versions:
           <a href='mandelbrot.html'>mandelbrot</a> |
