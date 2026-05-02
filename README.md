@@ -1,4 +1,4 @@
-Mandelbrot Set renderer in HTML5 canvas and javascript.
+[Fractal explorers](http://rsweny.github.io/mandelbrot-js) in HTML5 canvas, javascript and WebGPU.
 
 [Mandelbrot](http://rsweny.github.io/mandelbrot-js/mandelbrot.html) | [Buddhabrot](http://rsweny.github.io/mandelbrot-js/buddhabrot.html) | [Mandelbulb](http://rsweny.github.io/mandelbrot-js/mandelbulb.html) | [Newton](http://rsweny.github.io/mandelbrot-js/newton.html) | [Newtonbrot](http://rsweny.github.io/mandelbrot-js/newtonbrot.html) | [Taylor](http://rsweny.github.io/mandelbrot-js/taylor.html)
 

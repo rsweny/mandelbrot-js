@@ -517,7 +517,7 @@ function main()
 	$('savePNG').onclick = function(_e)
 	{
 		var link = document.createElement('a');
-		link.download = 'mandelbulb-' + renderpass + '-' + max_alpha + '.png';
+		link.download = 'mandelbulb-' + renderpass + '-' + Math.round(max_alpha) + '.png';
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	};

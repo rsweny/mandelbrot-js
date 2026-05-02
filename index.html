@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fractal Explorers</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+    header h1 {
+      font-size: 2.4rem;
+      font-weight: 300;
+      letter-spacing: 0.12em;
+      color: #fff;
+    }
+    header p {
+      margin-top: 0.5rem;
+      color: #777;
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+    }
+
+    .fractals {
+      display: flex;
+      flex-direction: column;
+      gap: 3.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .fractal-section h2 {
+      font-size: 1.25rem;
+      font-weight: 400;
+      letter-spacing: 0.06em;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid #2a2a2a;
+      padding-bottom: 0.5rem;
+    }
+    .fractal-section h2 a {
+      color: #c8a96e;
+      text-decoration: none;
+    }
+    .fractal-section h2 a:hover {
+      color: #e8c98e;
+      text-decoration: underline;
+    }
+
+    .gallery {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .gallery a {
+      display: block;
+      flex: 1 1 200px;
+      max-width: 340px;
+      overflow: hidden;
+      border-radius: 4px;
+      border: 1px solid #1e1e1e;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .gallery a:hover {
+      border-color: #c8a96e;
+      transform: translateY(-2px);
+    }
+
+    .gallery img {
+      display: block;
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+      background: #111;
+    }
+
+    .no-renders {
+      color: #444;
+      font-style: italic;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Fractal Explorers</h1>
+  <p>HTML5 Canvas, JavaScript &amp; WebGPU</p>
+</header>
+
+<div class="fractals">
+
+  <section class="fractal-section">
+    <h2><a href="mandelbrot.html">The Mandelbrot Set</a></h2>
+    <div class="gallery">
+      <a href="renders/mandelbrot1.png" target="_blank"><img src="renders/mandelbrot1.png" alt="Mandelbrot render 1"></a>
+      <a href="renders/mandelbrot2.png" target="_blank"><img src="renders/mandelbrot2.png" alt="Mandelbrot render 2"></a>
+      <a href="renders/mandelbrot3.png" target="_blank"><img src="renders/mandelbrot3.png" alt="Mandelbrot render 3"></a>
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="buddhabrot.html">Buddhabrot</a></h2>
+    <div class="gallery">
+      <a href="renders/buddhabrot.png" target="_blank"><img src="renders/buddhabrot.png" alt="Buddhabrot render"></a>
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="mandelbulb.html">Mandelbulb</a></h2>
+    <div class="gallery">
+      <a href="renders/mandelbulb-GPU.png" target="_blank"><img src="renders/mandelbulb-GPU.png" alt="Mandelbulb GPU render"></a>
+      <a href="renders/mandelbulb-158-261.39940889754786.png" target="_blank"><img src="renders/mandelbulb-158-261.39940889754786.png" alt="Mandelbulb render 1"></a>
+      <a href="renders/mandelbulb-213-249.9333454107314.png" target="_blank"><img src="renders/mandelbulb-213-249.9333454107314.png" alt="Mandelbulb render 2"></a>
+      <a href="renders/mandelbulb-230-36.208849892628116.png" target="_blank"><img src="renders/mandelbulb-230-36.208849892628116.png" alt="Mandelbulb render 3"></a>
+      <a href="renders/mandelbulb-311-68.07778610484847.png" target="_blank"><img src="renders/mandelbulb-311-68.07778610484847.png" alt="Mandelbulb render 4"></a>
+      <a href="renders/mandelbulb-223-417.2032305188963.png" target="_blank"><img src="renders/mandelbulb-223-417.2032305188963.png" alt="Mandelbulb render 5"></a>
+      <a href="renders/mandelbulb-79186-35.13548486368366.png" target="_blank"><img src="renders/mandelbulb-79186-35.13548486368366.png" alt="Mandelbulb render 6"></a>
+      <a href="renders/mandelbulb-754-1040.1822849903076.png" target="_blank"><img src="renders/mandelbulb-754-1040.1822849903076.png" alt="Mandelbulb render 7"></a>
+      <a href="renders/mandelbulb-326-3121.9747616441296.png" target="_blank"><img src="renders/mandelbulb-326-3121.9747616441296.png" alt="Mandelbulb render 8"></a>
+
+
+
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="newton.html">Newton Fractal</a></h2>
+    <div class="gallery">
+      <a href="renders/newton.png" target="_blank"><img src="renders/newton.png" alt="Newton fractal render"></a>
+      <a href="renders/newton-3.png" target="_blank"><img src="renders/newton-3.png" alt="Newton fractal render"></a>
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="newtonbrot.html">Newtonbrot</a></h2>
+    <div class="gallery">
+      <a href="renders/newtonbrot.png" target="_blank"><img src="renders/newtonbrot.png" alt="Newtonbrot render"></a>
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="flame.html">3D Flame Fractal</a></h2>
+    <div class="gallery">
+      <a href="renders/flame-7998.png" target="_blank"><img src="renders/flame-7998.png" alt="Flame fractal render"></a>
+      <a href="renders/flame.png" target="_blank"><img src="renders/flame.png" alt="Flame fractal render"></a>
+    </div>
+  </section>
+
+  <section class="fractal-section">
+    <h2><a href="taylor.html">Taylor Series Fractal</a></h2>
+    <div class="gallery">
+      <a href="renders/taylor.png" target="_blank"><img src="renders/taylor.png" alt="Taylor series render"></a>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
