@@ -21,6 +21,7 @@
 //constants
 var mode = 0;
 var iterations = 20;
+var zero = Complex["0"];
 var two = Complex(2, 0);
 var one = Complex(1, 0);
 var pointone = Complex(0.1, 0);
@@ -30,7 +31,6 @@ var oneError = Complex(1,complex_error);
 
 var order = 3;
 var img_order = 0;
-
 
 var zoomStart = 3.4;
 var zoom = [zoomStart, zoomStart];
@@ -92,16 +92,12 @@ function iterateEquation(i, j, equation, derivative)
 	while(n < iterations && distance(old,z) > rootBoundry) 
 	{
 		old = z;
-		
 		z = z.sub( equation(z,i,j).div(derivative(z,i,j)) );
-		
-		if (mandelbrotAddition)
-			z = z.add(Complex(i/2.0,j/2.0));
-			
+		if (mandelbrotAddition) z = z.add(Complex(i/2.0,j/2.0));	
 		n++;
 		
 		//normal smoothing
-		w = 1.0 / distance(z.sub(old), Complex["0"]);
+		w = 1.0 / distance(z.sub(old), zero);
 		hue += Math.pow(1.05, -w);
 	}
 	
@@ -123,7 +119,6 @@ function iterateEquation(i, j, equation, derivative)
 	
 	return vals;
 }
-
 
 var mandelbrotAddition = false;
 var rootBoundry = 0.00000001;
@@ -189,107 +184,99 @@ function DivZDerivative(z, i, j)
 }
 
 
-/*
-	
-	//z^10 + 0.2 i * z^5 - 1.
-	public Complex Poly2Function(Complex z, double i, double j) 
-	{
-		Complex exponent = new Complex(order, img_order);
-		Complex point2i = new Complex(0, 0.2);
-		Complex ten = new Complex(10, 0);
-		return (z.pow(ten)).add (point2i.mul(z.pow(exponent))).sub ( one );
-	}
-	
-	//10z^9 + 0.2i*5*z^4
-	public Complex Poly2Derivative(Complex z, double i, double j) 
-	{
-		Complex exponent = new Complex(order, img_order);
-		Complex exponentLessOne = exponent.sub(oneError);
-		Complex ten = new Complex(10, 0);
-		Complex nine = new Complex(9, 0);
-		Complex point2i = new Complex(0, 0.2);
+//Mode2: z^10 + 0.2i * z^5 - 1
+function Poly2Function(z, i, j)
+{
+	var exponent = Complex(order, img_order);
+	var point2i  = Complex(0, 0.2);
+	var ten      = Complex(10, 0);
+	return z.cPow(ten).add( point2i.mult(z.cPow(exponent)) ).sub(one);
+}
+//Mode2: 10z^9 + 0.2i*5*z^4
+function Poly2Derivative(z, i, j)
+{
+	var exponent        = Complex(order, img_order);
+	var exponentLessOne = exponent.sub(oneError);
+	var ten             = Complex(10, 0);
+	var nine            = Complex(9, 0);
+	var point2i         = Complex(0, 0.2);
+	return ten.mult(z.cPow(nine)).add( point2i.mult(exponent).mult(z.cPow(exponentLessOne)) );
+}
 
-		return (ten.mul(z.pow(nine))).add(  point2i.mul(exponent).mul(z.pow(exponentLessOne)) );
-	}
-	
+//Mode3: 2z^n - c + 1  (c = pixel coordinate)
+function PolyMFunction(z, i, j)
+{
+	var c = Complex(i, j);
+	var exponent = Complex(order, img_order);
+	return two.mult(z.cPow(exponent)).sub(c).add(one);
+}
+//Mode3: 2*n*z^(n-1) - 1
+function PolyMDerivative(z, i, j)
+{
+	var exponent = Complex(order, img_order);
+	var exponentLessOne = exponent.sub(oneError);
+	return two.mult(exponent).mult(z.cPow(exponentLessOne)).sub(one);
+}
 
-	//2z^3 - c + 1
-	public Complex PolyMFunction(Complex z, double i, double j) 
-	{
-		Complex c = new Complex(i, j);
-		Complex exponent = new Complex(order, img_order);
-		return two.mul( z.pow(exponent) ).sub(c).add(one);
-	}
-	
-	//6z^2 - 1
-	public Complex PolyMDerivative(Complex z, double i, double j) 
-	{
-		Complex exponent = new Complex(order, img_order);
-		Complex exponentLessOne = exponent.sub(oneError);
-		return two.mul(exponent).mul( z.pow(exponentLessOne) ).sub(one);
-	}
-	
-	
-	
-	//z^c - z + 0.1
-	public Complex Poly3Function(Complex z, double i, double j) 
-	{
-		Complex c = new Complex(1+order, img_order);
-		return z.pow(c).sub(z).add(pointone);
-	}
-	
-	//c*z^(c-1) - 1
-	public Complex Poly3Derivative(Complex z, double i, double j) 
-	{
-		Complex cminus1 = new Complex(1+order-1, (img_order == 0) ? 0 : img_order-1);
-		Complex c = new Complex(1+order, img_order);
-		return c.mul(z.pow(cminus1)).sub(one);
-	}
-	
-	
-	//z^n - 3z^5 + 6z^3 - 3z + 3
-	public Complex PolyFunction(Complex z, double i, double j) 
-	{
-		Complex exponent = new Complex(order, img_order);
-		Complex three = new Complex(3, 0);
-		Complex six = new Complex(6, 0);
-		Complex five = new Complex(5, 0);
-		
-		return (z.pow(exponent)).sub (three.mul(z.pow(five))).add ( six.mul(z.pow(three)) ).sub (three.mul(z)).add(three);
-	}
-	
-	public Complex PolyDerivative(Complex z, double i, double j) 
-	{
-		Complex exponent = new Complex(order, img_order);
-		Complex exponentLessOne = exponent.sub(oneError);
-		Complex three = new Complex(3, 0);
-		Complex eighteen = new Complex(18, 0);
-		Complex fifteen = new Complex(15, 0);
-		Complex four = new Complex(4, 0);
-		return (exponent.mul(z.pow(exponentLessOne))).sub (fifteen.mul(z.pow(four))).add ( eighteen.mul(z.pow(two)) ).sub(three);
-	}
+//Mode4: z^c - z + 0.1  (c = 1+order)
+function Poly3Function(z, i, j)
+{
+	var c = Complex(1 + parseFloat(order), img_order);
+	return z.cPow(c).sub(z).add(pointone);
+}
 
-	//z^z - cz
-	public Complex ZZFunction(Complex z, double i, double j) 
-	{
-		Complex con = new Complex(order, img_order);
-		return (z.pow(z)).sub( con.mul(z) );
-	}
-	
-	//z^z * (1 + lnz) - c
-	public Complex ZZDerivative(Complex z, double i, double j) 
-	{
-		Complex con = new Complex(order, img_order);
-		Complex lnz = z.log().add(one);
-		return ((z.pow(z)).mul( lnz )).sub(con);
-	}
-
-	*/
+//Mode4: c*z^(c-1) - 1
+function Poly3Derivative(z, i, j)
+{
+	var n = parseFloat(order);
+	var c = Complex(1 + n, img_order);
+	var cminus1 = Complex(n, (img_order === 0) ? 0 : img_order - 1);
+	return c.mult(z.cPow(cminus1)).sub(one);
+}
 
 
+//Mode5: z^n - 3z^5 + 6z^3 - 3z + 3
+function PolyFunction(z, i, j)
+{
+	var exponent = Complex(order, img_order);
+	var three    = Complex(3, 0);
+	var six      = Complex(6, 0);
+	var five     = Complex(5, 0);
+	return z.cPow(exponent)
+		.sub( three.mult(z.cPow(five)) )
+		.add( six.mult(z.cPow(three)) )
+		.sub( three.mult(z) )
+		.add( three );
+}
+//Mode5: n*z^(n-1) - 15z^4 + 18z^2 - 3
+function PolyDerivative(z, i, j)
+{
+	var exponent        = Complex(order, img_order);
+	var exponentLessOne = exponent.sub(oneError);
+	var three    = Complex(3, 0);
+	var four     = Complex(4, 0);
+	var fifteen  = Complex(15, 0);
+	var eighteen = Complex(18, 0);
+	return exponent.mult(z.cPow(exponentLessOne))
+		.sub( fifteen.mult(z.cPow(four)) )
+		.add( eighteen.mult(z.cPow(two)) )
+		.sub( three );
+}
 
 
-
+//Mode6: z^z - c*z  (c = order + img_order*i)
+function ZZFunction(z, i, j)
+{
+	var con = Complex(order, img_order);
+	return z.cPow(z).sub( con.mult(z) );
+}
+//Mode6: z^z * (1 + ln z) - c
+function ZZDerivative(z, i, j)
+{
+	var con = Complex(order, img_order);
+	var lnz = Complex.log(z).add(one);
+	return z.cPow(z).mult(lnz).sub(con);
+}
 
 /*
  * Render the Mandelbrot set
@@ -299,21 +286,33 @@ function draw(superSamples)
 	mode = $("mode").selectedIndex;
 
 	var equation, derivative;
-	if (mode == 0)
-	{
+	if (mode == 0) {
 		equation = UnityFunction;
 		derivative = UnityDerivative;
-	}
-	else if (mode == 1)
-	{
-		equation = DivZFunction
-		derivative = DivZDerivative
+	} else if (mode == 1) {
+		equation = DivZFunction;
+		derivative = DivZDerivative;
+	} else if (mode == 2) {
+		equation = Poly2Function;
+		derivative = Poly2Derivative;
+	} else if (mode == 3) {
+		equation = PolyMFunction;
+		derivative = PolyMDerivative;
+	} else if (mode == 4) {
+		equation = Poly3Function;
+		derivative = Poly3Derivative;
+	} else if (mode == 5) {
+		equation = PolyFunction;
+		derivative = PolyDerivative;
+	} else if (mode == 6) {
+		equation = ZZFunction;
+		derivative = ZZDerivative;
 	}
 
 	console.log("mode: " + mode);
 	order = $("real_exponent").value;
 	img_order = parseFloat($("complex_exponent").value);
-	iterations = $("txtSteps").value;
+	iterations = $("txtIterations").value;
 	roots = [];
 
 
@@ -346,7 +345,6 @@ function draw(superSamples)
 		adjustAspectRatio(xRange, yRange, canvas);
 	}
 
-
 	var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width-1));
 	var dy = (yRange[1] - yRange[0]) / (0.5 + (canvas.height-1));
 	var Ci_step = (yRange[1] - yRange[0]) / (0.5 + (canvas.height-1));
@@ -361,7 +359,7 @@ function draw(superSamples)
 	{
 		var Cr = Cr_init;
 
-		for ( var x=0; x<canvas.width; ++x, Cr += Cr_step ) {
+		for ( var x=0; x < canvas.width; ++x, Cr += Cr_step ) {
 			var color = [0, 0, 0, 255];
 
 			for ( var s=0; s<superSamples; ++s ) {
@@ -396,18 +394,21 @@ function draw(superSamples)
 
 	function pickColor(iter)
 	{
+		if (iter[0] == iterations) {
+			if (mandelbrotAddition || mode == 3) {
+				return [0,0,0,255];
+			} else {
+				return [255,255,255,255];
+			}
+		}
 		var hue;
-		if (mandelbrotAddition)
-		{
+		if (mandelbrotAddition) {
 			//get Color based on angle of z	
 			var angle = Math.atan(iter[3]/iter[2]);
-
 			angle = angle + (Math.PI / 2);
 			angle = angle / Math.PI;
 			hue = angle;
-		}
-		else
-		{
+		} else {
 			//limit the colors to 30% of the spectrum, unless a complex root
 			var limitfactor = 0.3;
 			if (img_order != 0) limitfactor = 1.0;	
@@ -418,7 +419,7 @@ function draw(superSamples)
 		huesat = iter[0]/(iterations/brightness);
 		if (huesat >= 1.0) huesat = 0.9999;
 
-		huesat = (iter[0] == iterations) ? 1 : huesat * 16000000;
+		huesat = huesat * 16000000;
 		if (huesat > 16000000)  { 
 			huesat = Math.abs(16000000 + (16000000-huesat));
 		}
@@ -458,10 +459,7 @@ function draw(superSamples)
 
 		var scanline = function()
 		{
-			if (    renderId != ourRenderId ||
-					 startHeight != canvas.height ||
-						startWidth != canvas.width )
-			{
+			if (renderId != ourRenderId || startHeight != canvas.height || startWidth != canvas.width) {
 				// Stop drawing
 				return;
 			}
@@ -530,7 +528,6 @@ var glow = 1.7;
 var spectrum = 0.3;
 var initialColor = 0.95;
 
-
 function HSVtoRGB(h, s, v) {
 		var r, g, b, i, f, p, q, t;
 		if (h && s === undefined && v === undefined) {
@@ -557,10 +554,6 @@ function HSVtoRGB(h, s, v) {
 
 		return rgb;
 }
-
-
-
-
 
 /*
  * Update URL's hash with render parameters so we can pass it around.
@@ -618,8 +611,8 @@ function readHashTag()
 			} break;
 
 			case 'iterations': {
-				$('txtSteps').value = val;
-				console.log("readHashTag() " + $('txtSteps').value);
+				$('txtIterations').value = val;
+				console.log("readHashTag() " + $('txtIterations').value);
 				redraw = true;
 			} break;
 
@@ -696,7 +689,7 @@ function main()
 	$('viewPNG').onclick = function(event)
 	{
 		var link = document.createElement('a');
-		link.download = 'newton.png';
+		link.download = `newton-${mode}.png`;
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	};
@@ -710,6 +703,10 @@ function main()
 		reInitCanvas = true;
 		draw(getSamples());
 	};
+
+	$("txtIterations").onchange = function() {
+		draw(getSamples());
+	}
 
 	$("mode").onchange = function() {
 		draw(getSamples());
@@ -740,10 +737,18 @@ function main()
 	if ( dragToZoom == true ) {
 		var box = null;
 
+		$('canvasControls').oncontextmenu = function(e) {
+			e.preventDefault();
+		};
+
 		$('canvasControls').onmousedown = function(e)
 		{
-			if ( box == null )
-				box = [e.clientX, e.clientY, 0, 0];
+			if ( e.button === 2 ) {
+				var desc = $('description');
+				desc.style.display = (desc.style.display === 'none') ? 'block' : 'none';
+				return;
+			}
+			if ( box == null ) box = [e.clientX, e.clientY, 0, 0];
 		}
 
 		$('canvasControls').onmousemove = function(e)

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>3D Flame Fractal in HTML5 Canvas &amp; JavaScript</title>
+    <title>3D Flame Fractal</title>
 
     <style type="text/css">
       body {
@@ -63,24 +63,15 @@
         color: #ccc;
       }
 
-      #description input[type="number"],
-      #description input[type="text"] {
+      #description input {
         color: #ccc;
         outline: none;
         background-color: rgba(48,48,48,0.3);
         border-width: 1px;
         border-color: #444;
-      }
-
-      #description input[type="number"]::-webkit-inner-spin-button,
-      #description input[type="number"]::-webkit-outer-spin-button {
-        appearance: none;
-        margin: 0;
-      }
-
-      #description input[type="number"] {
         appearance: textfield;
       }
+
 
       #description select {
         border: #444 1px solid;
@@ -153,15 +144,15 @@
 
           <tr>
             <td>Zoom</td>
-            <td><input id="zoomInput" class="textInput" type="number" value="1.0" step="0.01"/></td>
+            <td><input id="zoomInput" class="textInput" value="1.0"/></td>
           </tr>
           <tr>
             <td>X Center</td>
-            <td><input id="xcenInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+            <td><input id="xcenInput" class="textInput" value="0.0"/></td>
           </tr>
           <tr>
             <td>Y Center</td>
-            <td><input id="ycenInput" class="textInput" type="number" value="0.0" step="0.01"/></td>
+            <td><input id="ycenInput" class="textInput" value="0.0"/></td>
           </tr>
 
           <tr>
@@ -222,7 +213,7 @@
           </tr>
           <tr>
             <td>Glow</td>
-            <td><input id="glowInput" class="textInput" type="number" value="0.1" step="0.01"/></td>
+            <td><input id="glowInput" class="textInput" type="number" value="0.2" step="0.01"/></td>
           </tr>
           <tr>
             <td>Horizon</td>
@@ -234,8 +225,17 @@
           </tr>
 
           <tr><td colspan="2"><hr/></td></tr>
-          <tr><td colspan="2" class="sectionHeader">Color Palette</td></tr>
+          <tr><td colspan="2" class="sectionHeader">Preset</td></tr>
+          <tr>
+            <td colspan="2">
+              <select id="presetSelect" style="width:100%">
+                <option value="">-- Select Preset --</option>
+              </select>
+            </td>
+          </tr>
 
+          <tr><td colspan="2"><hr/></td></tr>
+          <tr><td colspan="2" class="sectionHeader">Color Palette</td></tr>
           <tr>
             <td colspan="2">
               <select id="colorPalette">
@@ -251,16 +251,6 @@
                 <option value="Warm Gold">Warm Gold</option>
                 <option value="Spectral">Spectral</option>
                 <option value="Rainbow">Rainbow</option>
-              </select>
-            </td>
-          </tr>
-
-          <tr><td colspan="2"><hr/></td></tr>
-          <tr><td colspan="2" class="sectionHeader">Preset</td></tr>
-          <tr>
-            <td colspan="2">
-              <select id="presetSelect" style="width:100%">
-                <option value="">-- Select Preset --</option>
               </select>
             </td>
           </tr>

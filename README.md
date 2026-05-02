@@ -1,4 +1,5 @@
-[Fractal explorers](http://rsweny.github.io/mandelbrot-js) in HTML5 canvas, javascript and WebGPU.
+## [Fractal explorers](http://rsweny.github.io/mandelbrot-js)
+### in HTML5 canvas, javascript and WebGPU.
 
 [Mandelbrot](http://rsweny.github.io/mandelbrot-js/mandelbrot.html) | [Buddhabrot](http://rsweny.github.io/mandelbrot-js/buddhabrot.html) | [Mandelbulb](http://rsweny.github.io/mandelbrot-js/mandelbulb.html) | [Newton](http://rsweny.github.io/mandelbrot-js/newton.html) | [Newtonbrot](http://rsweny.github.io/mandelbrot-js/newtonbrot.html) | [Taylor](http://rsweny.github.io/mandelbrot-js/taylor.html)
 
@@ -324,19 +325,3 @@ Older Versions
 
 http://cabin.stasis.org/mandelbrot.html | http://cabin.stasis.org/buddhabrot.html | http://cabin.stasis.org/newton.html
 
-
-License
--------
-Copyright 2012 Christian Stigen Larsen
-
-Licensed under the Apache License, Version 2.0 (the "License"); you may not
-use this file except in compliance with the License.  You may obtain a copy
-of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-License for the specific language governing permissions and limitations
-under the License.

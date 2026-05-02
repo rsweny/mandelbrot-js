@@ -894,10 +894,9 @@ function main() {
 
   $('drawButton').onclick  = function() { draw(true); };
   $('resetButton').onclick = resetAndDraw;
-
   $('viewPNG').onclick = function() {
     const link = document.createElement('a');
-    link.download = 'newtonbrot.png';
+    link.download = `newtonbrot-${runtotal}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };

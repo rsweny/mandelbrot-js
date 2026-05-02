@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Newton Fractal in HTML5 Canvas &amp; JavaScript</title>
+    <title>Newton Fractal</title>
 
     <style type="text/css">
       body {
@@ -149,14 +149,19 @@
         </tr>
         <tr>
           <td>Iterations</td>
-          <td><input class="textInput" size="4" type="text" id="txtSteps" value="50" /></td>
+          <td><input class="textInput" size="4" type="text" id="txtIterations" value="50" /></td>
         </tr>
         <tr>
           <td>Equation</td>
           <td>
             <select id="mode">
-              <option value="mode0">z^n - 1 = 0</option>
-              <option value="mode1">z^n - 1 / z</option>
+              <option value="mode0">z^n - 1</option>
+              <option value="mode1">z^n - 1/z</option>
+              <option value="mode2">z^10 + 0.2i·z^n - 1</option>
+              <option value="mode3">2z^n - c + 1</option>
+              <option value="mode4">z^(1+n) - z + 0.1</option>
+              <option value="mode5">z^n - 3z^5 + 6z^3 - 3z + 3</option>
+              <option value="mode6">z^z - n·z</option>
             </select>
           </td>
         </tr>
@@ -214,7 +219,7 @@
           HTML5 based on Christian Stigen Larsen &mdash;
           <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
           <br/> &nbsp; <br/>
-          Click+drag to zoom in, Shift+click for corresponding Julia.
+          Click+drag to zoom in, Shift+click to zoom out.
           You can change the settings above and hit <i>Draw</i> to render anew.
           <br/>Live versions:
           <a href='mandelbrot.html'>mandelbrot</a> |
