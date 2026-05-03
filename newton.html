@@ -187,14 +187,18 @@
         <tr>
 
         <tr>
+        <td>Brightness</td>
+        <td><input id="brightnessSlider" type="range" min="1" max="10" step="0.1" value="3.0"/></td>
+        <tr>
+
+        <tr>
         <td>Mandelbrot Variant</td>
         <td><input type="checkbox" id="mandelbrot"/></td>
         <tr>
 
-
         <tr>
           <td>Supersamples</td>
-          <td><input class="textInput" size="4" type="text" id="superSamples" value="1" /></td>
+          <td><input class="textInput" size="4" type="text" id="superSamples" value="2" /></td>
         </tr>
 
         <tr>
@@ -238,13 +242,8 @@
       <canvas id="canvasControls" width="0" height="0"> </canvas>
     </div>
 
-    <div id="infoBox">
-      <span id="infoText"></span>
-    </div>
-
     <script type="text/javascript" src="complex.js"></script>
     <script type="text/javascript" src="newton.js"></script>
-
 
   </body>
 </html>

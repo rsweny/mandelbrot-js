@@ -44,6 +44,291 @@ var dragToZoom = true;
 var colors = [[0,0,0,0]];
 var renderId = 0; // To zoom before current render is finished
 
+// WebGPU accelerates the per-pixel Newton iterations.  Root discovery and
+// colour mapping stay on the CPU so the existing scanline ordering and palette
+// side effects are preserved.
+var newtonGPU = null;
+var newtonGPUDisabled = false;
+var newtonGPUStatus = 'CPU';
+var newtonGPUInFlight = false;
+
+var NEWTON_PIXEL_WGSL = `
+struct Params {
+  width: u32,
+  height: u32,
+  iterations: u32,
+  mode: u32,
+  mandelbrotAddition: u32,
+  samples: u32,
+  _pad1: u32,
+  _pad2: u32,
+  xStart: f32,
+  yStart: f32,
+  dx: f32,
+  dy: f32,
+  order: f32,
+  imgOrder: f32,
+  complexError: f32,
+  rootBoundary: f32,
+};
+
+@group(0) @binding(0) var<uniform> P: Params;
+// x=hue, y=iteration count, z=final real, w=final imaginary
+@group(0) @binding(1) var<storage, read_write> outPixels: array<vec4<f32>>;
+
+fn cadd(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a + b; }
+fn csub(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a - b; }
+fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+fn cdiv(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let d = b.x * b.x + b.y * b.y;
+  if (d == 0.0) { return vec2<f32>(0.0 / d, 0.0 / d); }
+  return vec2<f32>((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}
+fn clog(z: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(log(length(z)), atan2(z.y, z.x));
+}
+fn cpow(z: vec2<f32>, w: vec2<f32>) -> vec2<f32> {
+  if (z.x == 0.0 && z.y == 0.0) { return vec2<f32>(0.0, 0.0); }
+  let logr = log(length(z));
+  let theta = atan2(z.y, z.x);
+  let newR = exp(w.x * logr - w.y * theta);
+  let newTheta = w.y * logr + w.x * theta;
+  return vec2<f32>(newR * cos(newTheta), newR * sin(newTheta));
+}
+
+fn hash01(v: u32) -> f32 {
+	var x = v;
+	x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+	x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+	x = (x >> 16u) ^ x;
+	return f32(x & 0x00ffffffu) / 16777216.0;
+}
+
+fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
+  let expo = vec2<f32>(P.order, P.imgOrder);
+  let one = vec2<f32>(1.0, 0.0);
+  let two = vec2<f32>(2.0, 0.0);
+  let pointOne = vec2<f32>(0.1, 0.0);
+  let oneError = vec2<f32>(1.0, P.complexError);
+  let expM1 = csub(expo, oneError);
+
+  switch (P.mode) {
+    case 0u: {
+      let f = csub(cpow(z, expo), one);
+      let df = cmul(expo, cpow(z, expM1));
+      return csub(z, cdiv(f, df));
+    }
+    case 1u: {
+      let f = csub(cpow(z, expo), cdiv(one, z));
+      let df = cadd(cmul(expo, cpow(z, expM1)), cpow(z, vec2<f32>(-2.0, 0.0)));
+      return csub(z, cdiv(f, df));
+    }
+    case 2u: {
+      let ten = vec2<f32>(10.0, 0.0);
+      let nine = vec2<f32>(9.0, 0.0);
+      let p2i = vec2<f32>(0.0, 0.2);
+      let f = csub(cadd(cpow(z, ten), cmul(p2i, cpow(z, expo))), one);
+      let df = cadd(cmul(ten, cpow(z, nine)), cmul(cmul(p2i, expo), cpow(z, expM1)));
+      return csub(z, cdiv(f, df));
+    }
+    case 3u: {
+      let f = cadd(csub(cmul(two, cpow(z, expo)), seed), one);
+      let df = csub(cmul(cmul(two, expo), cpow(z, expM1)), one);
+      return csub(z, cdiv(f, df));
+    }
+    case 4u: {
+      let c = vec2<f32>(1.0 + P.order, P.imgOrder);
+      let cMinus1Im = select(P.imgOrder - 1.0, 0.0, P.imgOrder == 0.0);
+      let cMinus1 = vec2<f32>(P.order, cMinus1Im);
+      let f = cadd(csub(cpow(z, c), z), pointOne);
+      let df = csub(cmul(c, cpow(z, cMinus1)), one);
+      return csub(z, cdiv(f, df));
+    }
+    case 5u: {
+      let three = vec2<f32>(3.0, 0.0);
+      let six = vec2<f32>(6.0, 0.0);
+      let five = vec2<f32>(5.0, 0.0);
+      let four = vec2<f32>(4.0, 0.0);
+      let fifteen = vec2<f32>(15.0, 0.0);
+      let eighteen = vec2<f32>(18.0, 0.0);
+      let f = cadd(csub(cadd(csub(cpow(z, expo), cmul(three, cpow(z, five))), cmul(six, cpow(z, three))), cmul(three, z)), three);
+      let df = csub(cadd(csub(cmul(expo, cpow(z, expM1)), cmul(fifteen, cpow(z, four))), cmul(eighteen, cpow(z, two))), three);
+      return csub(z, cdiv(f, df));
+    }
+    default: {
+      let con = vec2<f32>(P.order, P.imgOrder);
+      let zToZ = cpow(z, z);
+      let f = csub(zToZ, cmul(con, z));
+      let df = csub(cmul(zToZ, cadd(one, clog(z))), con);
+      return csub(z, cdiv(f, df));
+    }
+  }
+}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+	if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
+
+	let x = gid.x;
+	let sampleY = gid.y;
+	let y = sampleY / P.samples;
+	let sampleIdx = sampleY - y * P.samples;
+	let pixelIdx = y * P.width + x;
+	let idx = pixelIdx * P.samples + sampleIdx;
+	var seed = vec2<f32>(P.xStart + f32(x) * P.dx, P.yStart + f32(y) * P.dy);
+	if (P.samples > 1u) {
+	let sx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
+	let sy = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
+	seed = seed - vec2<f32>(sx * P.dx * 0.5, sy * P.dy * 0.5);
+	}
+
+  var n = 0u;
+  var old = seed;
+  var z = newtonStepGpu(seed, seed);
+  var hue = 0.0;
+
+  loop {
+    if (n >= P.iterations) { break; }
+    if (!(distance(old, z) > P.rootBoundary)) { break; }
+    old = z;
+    z = newtonStepGpu(z, seed);
+    if (P.mandelbrotAddition != 0u) {
+      z = z + seed * 0.5;
+    }
+    let delta = length(z - old);
+    let w = 1.0 / delta;
+    hue = hue + pow(1.05, -w);
+    n = n + 1u;
+  }
+
+  outPixels[idx] = vec4<f32>(hue, f32(n), z.x, z.y);
+}
+`;
+
+var NEWTON_GPU_PARAMS_BYTES = 64;
+var NEWTON_GPU_WORKGROUP_X = 16;
+var NEWTON_GPU_WORKGROUP_Y = 16;
+
+function isNewtonWebGPUSupported()
+{
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
+}
+
+function destroyNewtonGPU()
+{
+  if (!newtonGPU) return;
+  var bufs = ['paramsBuf', 'outputBuf', 'readBuf'];
+  for (var i = 0; i < bufs.length; i++) {
+    try { newtonGPU[bufs[i]].destroy(); } catch(e) {}
+  }
+  newtonGPU = null;
+}
+
+async function initNewtonGPU(resultCount)
+{
+  if (newtonGPUDisabled || !isNewtonWebGPUSupported()) return null;
+	  if (newtonGPU && newtonGPU.resultCapacity >= resultCount) return newtonGPU;
+
+  destroyNewtonGPU();
+  try {
+    var adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No WebGPU adapter');
+    var device = await adapter.requestDevice();
+	var outputBytes = resultCount * 4 * 4;
+
+    var paramsBuf = device.createBuffer({ size: NEWTON_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var outputBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var readBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    var module = device.createShaderModule({ code: NEWTON_PIXEL_WGSL });
+    var pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: module, entryPoint: 'main' } });
+    var bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: outputBuf } },
+      ],
+    });
+
+    newtonGPU = {
+      device: device,
+	  resultCapacity: resultCount,
+      outputBytes: outputBytes,
+      paramsBuf: paramsBuf,
+      outputBuf: outputBuf,
+      readBuf: readBuf,
+      pipeline: pipeline,
+      bindGroup: bindGroup,
+      paramsBytes: new ArrayBuffer(NEWTON_GPU_PARAMS_BYTES),
+    };
+    newtonGPUStatus = 'GPU';
+    return newtonGPU;
+  } catch (e) {
+    console.warn('Newton WebGPU path disabled; falling back to CPU.', e);
+    newtonGPUDisabled = true;
+    newtonGPUStatus = 'CPU fallback';
+    destroyNewtonGPU();
+    return null;
+  }
+}
+
+function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount)
+{
+  var u = new Uint32Array(gpu.paramsBytes);
+  var f = new Float32Array(gpu.paramsBytes);
+  u[0] = width >>> 0;
+  u[1] = height >>> 0;
+  u[2] = (parseInt(iterations, 10) || 0) >>> 0;
+  u[3] = mode >>> 0;
+  u[4] = mandelbrotAddition ? 1 : 0;
+  u[5] = sampleCount >>> 0;
+  u[6] = u[7] = 0;
+  f[8] = xRange[0];
+  f[9] = yRange[0];
+  f[10] = dx;
+  f[11] = dy;
+  f[12] = parseFloat(order) || 0;
+  f[13] = parseFloat(img_order) || 0;
+  f[14] = complex_error;
+  f[15] = rootBoundry;
+  gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
+}
+
+async function calcNewtonPixelsGPU(width, height, dx, dy, samples)
+{
+	var sampleCount = Math.max(1, parseInt(samples, 10) || 1);
+	var resultCount = width * height * sampleCount;
+	var gpu = await initNewtonGPU(resultCount);
+ 	if (!gpu) return null;
+
+	writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount);
+	var outputBytes = resultCount * 4 * 4;
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  var pass = encoder.beginComputePass();
+  pass.setPipeline(gpu.pipeline);
+  pass.setBindGroup(0, gpu.bindGroup);
+	  pass.dispatchWorkgroups(
+	    Math.ceil(width / NEWTON_GPU_WORKGROUP_X),
+	    Math.ceil((height * sampleCount) / NEWTON_GPU_WORKGROUP_Y)
+	  );
+  pass.end();
+  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
+
+  var range = gpu.readBuf.getMappedRange(0, outputBytes);
+  return {
+    pixels: new Float32Array(range),
+	    samples: sampleCount,
+    release: function() {
+      try { gpu.readBuf.unmap(); } catch(e) {}
+    },
+  };
+}
+
 /*
  * Initialize canvas
  */
@@ -74,10 +359,10 @@ function focusOnSubmit()
 
 function getSamples()
 {
-	var i = parseInt($('superSamples').value, 10);
-	return i<=0? 1 : i;
+	// more than 4x anti-alias samples can overload the GPU
+	var i = Math.min(4, parseInt($('superSamples').value));
+	return !isFinite(i) || i <= 0 ? 2 : i;
 }
-
 
 function iterateEquation(i, j, equation, derivative) 
 {
@@ -121,7 +406,7 @@ function iterateEquation(i, j, equation, derivative)
 }
 
 var mandelbrotAddition = false;
-var rootBoundry = 0.00000001;
+var rootBoundry = 0.0001;
 var roots = [];
 
 /* Newton functions */
@@ -139,7 +424,7 @@ function addRoot(root)
 		}
 	}
 
-	if (roots.length < 20 /*&& quad > 4*/)
+	if (roots.length < 20)
 	{
 		roots.push(root);
 		console.log("add root:" + roots.length);
@@ -326,6 +611,7 @@ function draw(superSamples)
 
 	initialColor = $("colorSlider").value / 100.0;
 	contrast = $("contrastSlider").value / 100.0;
+	brightness = Math.max(1.0, Math.min(10.0, parseFloat($("brightnessSlider").value) || 2.0));
 	console.log(order + " " + img_order + " iterations: " + iterations + " initialColor: "  + initialColor + " mode: " + mode);
 
 	if ( reInitCanvas ) {
@@ -350,7 +636,6 @@ function draw(superSamples)
 	var Ci_step = (yRange[1] - yRange[0]) / (0.5 + (canvas.height-1));
 
 	updateHashTag(superSamples);
-	updateInfoBox();
 
 	// Only enable one render at a time
 	renderId += 1;
@@ -360,7 +645,7 @@ function draw(superSamples)
 		var Cr = Cr_init;
 
 		for ( var x=0; x < canvas.width; ++x, Cr += Cr_step ) {
-			var color = [0, 0, 0, 255];
+			var color = [255, 255, 255, 255];
 
 			for ( var s=0; s<superSamples; ++s ) {
 				var rx = Math.random()*Cr_step;
@@ -378,13 +663,11 @@ function draw(superSamples)
 		}
 	}
 
-	function drawLine(Ci, off, Cr_init, Cr_step)
-	{
-		var Cr = Cr_init;
-
-		for ( var x=0; x<canvas.width; ++x, Cr += Cr_step ) {
-			var p = iterateEquation(Cr, Ci, equation, derivative);
-			var color = pickColor(p);
+	function drawLine(Ci, off, Cr_init, Cr_step) {
+		let Cr = Cr_init;
+		for (let x = 0; x < canvas.width; ++x, Cr += Cr_step) {
+			let p = iterateEquation(Cr, Ci, equation, derivative);
+			let color = pickColor(p);
 			img.data[off++] = color[0];
 			img.data[off++] = color[1];
 			img.data[off++] = color[2];
@@ -394,7 +677,12 @@ function draw(superSamples)
 
 	function pickColor(iter)
 	{
-		if (iter[0] == iterations) {
+		return pickColorValues(iter[0], iter[1], iter[2], iter[3]);
+	}
+
+	function pickColorValues(iter0, rootIndex, finalRe, finalIm)
+	{
+		if (iter0 == iterations) {
 			if (mandelbrotAddition || mode == 3) {
 				return [0,0,0,255];
 			} else {
@@ -403,24 +691,24 @@ function draw(superSamples)
 		}
 		var hue;
 		if (mandelbrotAddition) {
-			//get Color based on angle of z	
-			var angle = Math.atan(iter[3]/iter[2]);
+			//get Color based on angle of z
+			var angle = Math.atan(finalIm/finalRe);
 			angle = angle + (Math.PI / 2);
 			angle = angle / Math.PI;
 			hue = angle;
 		} else {
 			//limit the colors to 30% of the spectrum, unless a complex root
 			var limitfactor = 0.3;
-			if (img_order != 0) limitfactor = 1.0;	
-			hue = initialColor + (iter[1]*limitfactor) / roots.length;
+			if (img_order != 0) limitfactor = 1.0;
+			hue = initialColor + (rootIndex*limitfactor) / roots.length;
 		}
 
 		//normal shading
-		huesat = iter[0]/(iterations/brightness);
+		huesat = iter0/(iterations/brightness);
 		if (huesat >= 1.0) huesat = 0.9999;
 
 		huesat = huesat * 16000000;
-		if (huesat > 16000000)  { 
+		if (huesat > 16000000)  {
 			huesat = Math.abs(16000000 + (16000000-huesat));
 		}
 		huesat = (huesat % 16000000)/16000000.0;
@@ -514,7 +802,131 @@ function draw(superSamples)
 		scanline();
 	}
 
-	render();
+		async function renderGPU()
+		{
+			if (newtonGPUInFlight) return false;
+			newtonGPUInFlight = true;
+
+			var start = (new Date).getTime();
+			var startHeight = canvas.height;
+			var startWidth = canvas.width;
+			var ourRenderId = renderId;
+			var requestedSamples = superSamples;
+
+			function renderIsCurrent()
+			{
+				return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
+			}
+
+			function paintGPUBatch(batch)
+			{
+				if (!renderIsCurrent()) return true;
+
+				var gpuImg = ctx.createImageData(canvas.width, canvas.height);
+				var data = gpuImg.data;
+				var pixels = batch.pixels;
+				var iterationLimit = parseInt(iterations, 10) || 0;
+				var sampleCount = batch.samples;
+
+				for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
+					var colorSum = [0, 0, 0, 255];
+
+					for (var s = 0; s < sampleCount; s++) {
+						var poff = (idx * sampleCount + s) * 4;
+						var hue = pixels[poff];
+						var n = Math.round(pixels[poff + 1]);
+						var zre = pixels[poff + 2];
+						var zim = pixels[poff + 3];
+						var rootIndex = 0;
+						var iter0 = n;
+
+						if (!isFinite(hue) || !isFinite(n) || !isFinite(zre) || !isFinite(zim)) {
+							// GPU overflow/poles can produce NaN/Infinity; ImageData turns NaN colour channels into black, so treat these as non-converged white samples.
+							colorSum = addRGB(colorSum, [255,255,255,255]);
+							continue;
+						}
+
+						if (n == iterationLimit) {
+							// Match the CPU renderer: samples that hit the iteration limit are interior/non-converged and should be white.
+							if (mandelbrotAddition || mode == 3) {
+								colorSum = addRGB(colorSum, [0,0,0,255]);
+							} else {
+								colorSum = addRGB(colorSum, [255,255,255,255]);
+							}
+							continue;
+						}
+
+						if (n != iterationLimit) {
+							iter0 = hue;
+							rootIndex = addRoot({re: zre, i: zim});
+						}
+
+						colorSum = addRGB(colorSum, pickColorValues(iter0, rootIndex, zre, zim));
+					}
+
+					var color = divRGB(colorSum, sampleCount);
+					var outOff = idx * 4;
+
+					data[outOff] = color[0];
+					data[outOff + 1] = color[1];
+					data[outOff + 2] = color[2];
+					data[outOff + 3] = 255;
+				}
+
+				if (!renderIsCurrent()) return true;
+				ctx.putImageData(gpuImg, 0, 0);
+				return true;
+			}
+
+			async function runGPUPass(samplesForPass)
+			{
+				var batch = null;
+				try {
+					batch = await calcNewtonPixelsGPU(canvas.width, canvas.height, dx, dy, samplesForPass);
+				} catch (e) {
+					console.warn('Newton WebGPU render failed; falling back to CPU.', e);
+					newtonGPUDisabled = true;
+					newtonGPUStatus = 'CPU fallback';
+					destroyNewtonGPU();
+					return false;
+				}
+
+				if (!batch) return false;
+				try {
+					return paintGPUBatch(batch);
+				} finally {
+					batch.release();
+				}
+			}
+
+			try {
+				// First pass deliberately uses one sample to discover roots quickly.
+				// The second pass keeps those roots and recolours the full image.
+				if (!await runGPUPass(1)) return false;
+				if (!renderIsCurrent()) return true;
+				if (!await runGPUPass(requestedSamples)) return false;
+
+				var elapsedMS = Math.max(1, (new Date).getTime() - start);
+				$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1);
+				$('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
+				$('renderSpeedUnit').innerHTML = 'second (GPU)';
+				newtonGPUStatus = 'GPU';
+				return true;
+			} finally {
+				newtonGPUInFlight = false;
+			}
+		}
+
+			if (!newtonGPUDisabled && isNewtonWebGPUSupported()) {
+			var fallbackRenderId = renderId;
+			renderGPU().then(function(usedGPU) {
+				if (!usedGPU && renderId == fallbackRenderId) {
+					render();
+				}
+			});
+		} else {
+			render();
+		}
 }
 
 // Some constants used with smoothColor
@@ -524,64 +936,47 @@ var smoothColor = true;
 var band = 1.0;
 var contrast = 0.35;
 var brightness = 2.0;
-var glow = 1.7;
 var spectrum = 0.3;
 var initialColor = 0.95;
 
 function HSVtoRGB(h, s, v) {
-		var r, g, b, i, f, p, q, t;
-		if (h && s === undefined && v === undefined) {
-				s = h.s, v = h.v, h = h.h;
-		}
-		i = Math.floor(h * 6);
-		f = h * 6 - i;
-		p = v * (1 - s);
-		q = v * (1 - f * s);
-		t = v * (1 - (1 - f) * s);
-		switch (i % 6) {
-				case 0: r = v, g = t, b = p; break;
-				case 1: r = q, g = v, b = p; break;
-				case 2: r = p, g = v, b = t; break;
-				case 3: r = p, g = q, b = v; break;
-				case 4: r = t, g = p, b = v; break;
-				case 5: r = v, g = p, b = q; break;
-		}
+	var r, g, b, i, f, p, q, t;
+	if (h && s === undefined && v === undefined) {
+			s = h.s, v = h.v, h = h.h;
+	}
+	i = Math.floor(h * 6);
+	f = h * 6 - i;
+	p = v * (1 - s);
+	q = v * (1 - f * s);
+	t = v * (1 - (1 - f) * s);
+	switch (i % 6) {
+		case 0: r = v, g = t, b = p; break;
+		case 1: r = q, g = v, b = p; break;
+		case 2: r = p, g = v, b = t; break;
+		case 3: r = p, g = q, b = v; break;
+		case 4: r = t, g = p, b = v; break;
+		case 5: r = v, g = p, b = q; break;
+	}
 
-		var rgb = [0,0,0];
+	var rgb = [0,0,0];
 	rgb[0] = Math.floor(r * 255)
 	rgb[1] = Math.floor(g * 255)
 	rgb[2] = Math.floor(b * 255)
 
-		return rgb;
+	return rgb;
 }
 
 /*
  * Update URL's hash with render parameters so we can pass it around.
  */
-function updateHashTag(samples)
-{
+function updateHashTag(samples) {
 	var scheme = $('mode').value;
-
 	console.log("updateHashTag() " + iterations);
-
-	location.hash = 'zoom=' + zoom + '&' +
-									'lookAt=' + lookAt + '&' +
-									'iterations=' + iterations + '&' +
-									'superSamples=' + samples + '&' +
-									'mode=' + scheme;
-}
-
-/*
- * Update small info box in lower right hand side
- */
-function updateInfoBox()
-{
-	// Update infobox
-	$('infoBox').innerHTML =
-		'x<sub>0</sub>=' + xRange[0] + ' y<sub>0</sub>=' + yRange[0] + ' ' +
-		'x<sub>1</sub>=' + xRange[1] + ' y<sub>1</sub>=' + yRange[1] + ' ' +
-		'wxh=' + canvas.width + 'x' + canvas.height + ' '
-				+ (canvas.width*canvas.height/1000000.0).toFixed(1) + 'MP';
+	location.hash = 'zoom=' + zoom + '&lookAt=' + lookAt + '&iterations=' + iterations + '&superSamples=' + samples +
+		'&realExponent=' + encodeURIComponent($('real_exponent').value) +
+		'&complexExponent=' + encodeURIComponent($('complex_exponent').value) +
+		'&mandelbrot=' + ($('mandelbrot').checked ? '1' : '0') +
+		'&mode=' + scheme;
 }
 
 /*
@@ -617,7 +1012,22 @@ function readHashTag()
 			} break;
 
 			case 'superSamples': {
-				$('superSamples').value = String(parseInt(val, 10));
+				$('superSamples').value = String(parseInt(val));
+				redraw = true;
+			} break;
+
+			case 'realExponent': {
+				$('real_exponent').value = decodeURIComponent(val);
+				redraw = true;
+			} break;
+
+			case 'complexExponent': {
+				$('complex_exponent').value = decodeURIComponent(val);
+				redraw = true;
+			} break;
+
+			case 'mandelbrot': {
+				$('mandelbrot').checked = val === '1' || val === 'true';
 				redraw = true;
 			} break;
 
@@ -708,6 +1118,10 @@ function main()
 		draw(getSamples());
 	}
 
+	$("superSamples").onchange = function() {
+		draw(getSamples());
+	}
+
 	$("mode").onchange = function() {
 		draw(getSamples());
 	}
@@ -726,6 +1140,11 @@ function main()
 
 	$("contrastSlider").onchange = function() {
 		contrast = $("contrastSlider").value / 100.0;
+		draw(getSamples());
+	}
+
+	$("brightnessSlider").onchange = function() {
+		brightness = Math.max(1.0, Math.min(5.0, parseFloat($("brightnessSlider").value) || 2.0));
 		draw(getSamples());
 	}
 

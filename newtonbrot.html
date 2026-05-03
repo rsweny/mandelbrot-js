@@ -161,6 +161,13 @@
             <td><input class="textInput" size="6" type="text" id="complexError" value="1" /></td>
           </tr>
           <tr>
+            <td>Root Boundary</td>
+            <td>
+              <input id="rootBoundary" type="range" min="-8" max="-5" step="0.01" value="-6.15490196" />
+              <span id="rootBoundaryValue">7.0e-7</span>
+            </td>
+          </tr>
+          <tr>
             <td>Zoom</td>
             <td><input class="textInput" size="8" type="text" id="zoom" value="6" /></td>
           </tr>
@@ -187,10 +194,6 @@
               <input class="textInput depthG" size="4" type="text" id="depthGreen" value="140" />
               <input class="textInput depthB" size="4" type="text" id="depthBlue"  value="40"  />
             </td>
-          </tr>
-          <tr>
-            <td>Points/pass</td>
-            <td><input class="textInput" size="6" type="text" id="numPoints" value="1000" /></td>
           </tr>
           <tr>
             <td>Palette</td>
@@ -268,10 +271,6 @@
     <div id="canvasContainer">
       <canvas id="newtonCanvas"    width="0" height="0"></canvas>
       <canvas id="canvasControls"  width="0" height="0"></canvas>
-    </div>
-
-    <div id="infoBox">
-      <span id="infoText"></span>
     </div>
 
     <script type="text/javascript" src="newtonbrot.js"></script>

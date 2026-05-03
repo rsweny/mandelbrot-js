@@ -119,6 +119,14 @@ var imgRed, imgGreen, imgBlue, imgAlpha;
 var imageData;
 var imgCacheRe, imgCacheIm; // shared orbit scratch buffer
 
+// WebGPU orbit-batch state.  The CPU still owns root discovery, histogram
+// accumulation, and adaptive point scoring; WebGPU only accelerates the heavy
+// Newton iteration previously done inside calcOrbit().
+var orbitGPU = null;
+var orbitGPUDisabled = false;
+var orbitGPUStatus = 'GPU';
+var numPoints     = 8192;
+
 // Fractal parameters (matching Java defaults)
 var zoom          = 6;
 var xcen          = 0.1;
@@ -131,8 +139,7 @@ var brightness    = 3.0;
 var depthRed      = 200;
 var depthGreen    = 140;
 var depthBlue     = 40;
-var numPoints     = 1000;
-var rootBoundary  = 1e-13;
+var rootBoundary  = 7e-7; // interesting effects on GPU due to FP32 precision
 var algMode       = 0;
 var doInverse     = false;
 var byStructure   = true;
@@ -141,11 +148,10 @@ var palIndex      = 0;
 
 // Render-loop state
 var runtotal      = 1;
-var quadSize      = 36;
-var LOW_RES_PASSES = 340;
 var borderBuffer  = 40;
 var running       = false;
 var renderTimer   = null;
+var renderGeneration = 0;
 var lastUpdateTime = 0;
 var lastStatusTime = 0;
 var accepted = 0, rejected = 0;
@@ -165,6 +171,23 @@ var dragBox = null;
 // UI helpers
 // ---------------------------------------------------------------------------
 
+function rootBoundaryToSlider(v) {
+  return Math.log(Math.max(1e-8, Math.min(1e-5, v))) / Math.LN10;
+}
+
+function sliderToRootBoundary(v) {
+  return Math.pow(10, parseFloat(v));
+}
+
+function formatRootBoundary(v) {
+  return Number(v).toExponential(1);
+}
+
+function updateRootBoundaryLabel() {
+  var label = $('rootBoundaryValue');
+  if (label) label.textContent = formatRootBoundary(rootBoundary);
+}
+
 function readControls() {
   try { zoom         = parseFloat($('zoom').value)         || 6;    } catch(e){}
   try { xcen         = parseFloat($('xcen').value)         || 0.1;  } catch(e){}
@@ -177,7 +200,8 @@ function readControls() {
   try { depthRed     = parseInt($('depthRed').value, 10)   || 200;  } catch(e){}
   try { depthGreen   = parseInt($('depthGreen').value, 10) || 140;  } catch(e){}
   try { depthBlue    = parseInt($('depthBlue').value, 10)  || 40;   } catch(e){}
-  try { numPoints    = parseInt($('numPoints').value, 10)  || 1000; } catch(e){}
+  try { rootBoundary = sliderToRootBoundary($('rootBoundary').value) || 7e-7; } catch(e){}
+  updateRootBoundaryLabel();
   algMode       = parseInt($('algMode').value, 10);
   doInverse     = $('doInverse').checked;
   byStructure   = $('byStructure').checked;
@@ -197,7 +221,8 @@ function writeControls() {
   $('depthRed').value     = depthRed;
   $('depthGreen').value   = depthGreen;
   $('depthBlue').value    = depthBlue;
-  $('numPoints').value    = numPoints;
+  if ($('rootBoundary')) $('rootBoundary').value = rootBoundaryToSlider(rootBoundary);
+  updateRootBoundaryLabel();
   $('algMode').value      = algMode;
   $('doInverse').checked  = doInverse;
   $('byStructure').checked   = byStructure;
@@ -268,7 +293,6 @@ function clearAndReset(newRoots) {
   resetSmartPoints();
 
   runtotal     = 1;
-  quadSize     = 36;
   borderBuffer = 40;
   accepted     = 0;
   rejected     = 0;
@@ -343,18 +367,372 @@ function newtonStep(z, aa, bb) {
 }
 
 // ---------------------------------------------------------------------------
+// WebGPU Newton orbit batcher
+// ---------------------------------------------------------------------------
+
+var NEWTON_ORBIT_WGSL = `
+struct Params {
+  numJobs: u32,
+  maxDepth: u32,
+  depthRed: u32,
+  depthGreen: u32,
+  depthBlue: u32,
+  algMode: u32,
+  mandelbrotAdd: u32,
+  doInverse: u32,
+  runtotal: u32,
+  _pad0: u32,
+  _pad1: u32,
+  _pad2: u32,
+  order: f32,
+  imgOrder: f32,
+  complexError: f32,
+  rootBoundary: f32,
+};
+
+@group(0) @binding(0) var<uniform> P: Params;
+// x=startX, y=startY, z=depth, w=channel (channel is informational only)
+@group(0) @binding(1) var<storage, read> jobs: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> outOrbit: array<vec2<f32>>;
+// x=iter, y=finalRe, z=finalIm, w=mandelbrot-add solution color
+@group(0) @binding(3) var<storage, read_write> outResult: array<vec4<f32>>;
+
+const PI: f32 = 3.141592653589793;
+
+fn cadd(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a + b; }
+fn csub(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a - b; }
+fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+fn cdiv(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let d = b.x * b.x + b.y * b.y;
+  if (d == 0.0) { return vec2<f32>(0.0 / d, 0.0 / d); }
+  return vec2<f32>((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}
+fn cpow(z: vec2<f32>, w: vec2<f32>) -> vec2<f32> {
+  if (z.x == 0.0 && z.y == 0.0) { return vec2<f32>(0.0, 0.0); }
+  let logr = log(length(z));
+  let theta = atan2(z.y, z.x);
+  let newR = exp(w.x * logr - w.y * theta);
+  let newTheta = w.y * logr + w.x * theta;
+  return vec2<f32>(newR * cos(newTheta), newR * sin(newTheta));
+}
+
+fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
+  let expo = vec2<f32>(P.order, P.imgOrder);
+  let one = vec2<f32>(1.0, 0.0);
+  let oerr = vec2<f32>(1.0, P.complexError);
+  let expM1 = csub(expo, oerr);
+
+  switch (P.algMode) {
+    case 1u: {
+      let f = csub(cpow(z, expo), one);
+      let df = cmul(expo, cpow(z, expM1));
+      return csub(z, cdiv(f, df));
+    }
+    case 2u: {
+      let ten = vec2<f32>(10.0, 0.0);
+      let nine = vec2<f32>(9.0, 0.0);
+      let p2i = vec2<f32>(0.0, 0.2);
+      let f = csub(cadd(cpow(z, ten), cmul(p2i, cpow(z, expo))), one);
+      let df = cadd(cmul(ten, cpow(z, nine)), cmul(cmul(p2i, expo), cpow(z, expM1)));
+      return csub(z, cdiv(f, df));
+    }
+    case 3u: {
+      let two = vec2<f32>(2.0, 0.0);
+      let expM2 = csub(expo, two);
+      let f = cdiv(csub(cpow(z, expo), one), z);
+      let df = cadd(cmul(expM1, cpow(z, expM2)), cpow(z, vec2<f32>(-2.0, 0.0)));
+      return csub(z, cdiv(f, df));
+    }
+    case 4u: {
+      let c = vec2<f32>(10.0 + P.order, P.imgOrder);
+      let cm1im = select(P.imgOrder - 1.0, 0.0, P.imgOrder == 0.0);
+      let cm1 = vec2<f32>(10.0 + P.order - 1.0, cm1im);
+      let f = cadd(csub(cpow(z, c), z), vec2<f32>(0.1, 0.0));
+      let df = csub(cmul(c, cpow(z, cm1)), one);
+      return csub(z, cdiv(f, df));
+    }
+    case 5u: {
+      let f = csub(cpow(z, expo), cdiv(one, z));
+      let df = cadd(cmul(expo, cpow(z, expM1)), cpow(z, vec2<f32>(-2.0, 0.0)));
+      return csub(z, cdiv(f, df));
+    }
+    default: {
+      let three = vec2<f32>(3.0, 0.0);
+      let six = vec2<f32>(6.0, 0.0);
+      let five = vec2<f32>(5.0, 0.0);
+      let four = vec2<f32>(4.0, 0.0);
+      let eighteen = vec2<f32>(18.0, 0.0);
+      let fifteen = vec2<f32>(15.0, 0.0);
+      let f = cadd(csub(cadd(csub(cpow(z, expo), cmul(three, cpow(z, five))), cmul(six, cpow(z, three))), cmul(three, z)), three);
+      let df = csub(cadd(csub(cmul(expo, cpow(z, expM1)), cmul(fifteen, cpow(z, four))), cmul(eighteen, cpow(z, vec2<f32>(2.0, 0.0)))), three);
+      return csub(z, cdiv(f, df));
+    }
+  }
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let jobIdx = gid.x;
+  if (jobIdx >= P.numJobs) { return; }
+
+  let job = jobs[jobIdx];
+  let depth = u32(job.z);
+  let aa = 2.0 * (job.x - 0.5);
+  let bb = 2.0 * (job.y - 0.5);
+
+  var z = vec2<f32>(aa, bb);
+  var old = z;
+  var iter = 0u;
+
+  z = newtonStepGpu(z);
+
+  loop {
+    if (iter >= depth) { break; }
+    if (!(distance(old, z) > P.rootBoundary)) { break; }
+    old = z;
+    z = newtonStepGpu(z);
+    if (P.mandelbrotAdd != 0u) {
+      z = z + vec2<f32>(aa * 0.5, bb * 0.5);
+    }
+    outOrbit[jobIdx * P.maxDepth + iter] = z;
+    iter = iter + 1u;
+  }
+
+  var solutionColor = 0.0;
+  if (iter != P.depthRed || (P.doInverse != 0u && P.runtotal > 25u)) {
+    if (P.mandelbrotAdd != 0u) {
+      let cz = newtonStepGpu(z);
+      let angle = atan2(cz.y, cz.x) + PI / 2.0;
+      solutionColor = (angle / PI) * 254.0;
+    }
+  }
+
+  outResult[jobIdx] = vec4<f32>(f32(iter), z.x, z.y, solutionColor);
+}
+`;
+
+var NEWTON_GPU_PARAMS_BYTES = 64;
+var NEWTON_GPU_WORKGROUP = 64;
+
+function isOrbitWebGPUSupported() {
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
+}
+
+function ensureOrbitScratch(maxDepth) {
+  if (!imgCacheRe || imgCacheRe.length < maxDepth) {
+    imgCacheRe = new Float64Array(maxDepth);
+    imgCacheIm = new Float64Array(maxDepth);
+  }
+}
+
+function destroyOrbitGPU() {
+  if (!orbitGPU) return;
+  var bufs = ['paramsBuf','jobsBuf','orbitBuf','resultBuf','orbitReadBuf','resultReadBuf'];
+  for (var i = 0; i < bufs.length; i++) {
+    try { orbitGPU[bufs[i]].destroy(); } catch(e) {}
+  }
+  orbitGPU = null;
+}
+
+async function initOrbitGPU(jobCount, maxDepth) {
+  if (orbitGPUDisabled || !isOrbitWebGPUSupported()) return null;
+  if (orbitGPU && orbitGPU.jobCapacity >= jobCount && orbitGPU.maxDepth === maxDepth) return orbitGPU;
+
+  destroyOrbitGPU();
+  try {
+    var adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No WebGPU adapter');
+    var device = await adapter.requestDevice();
+
+    var jobsBytes = jobCount * 4 * 4;
+    var orbitBytes = jobCount * maxDepth * 2 * 4;
+    var resultBytes = jobCount * 4 * 4;
+
+    var paramsBuf = device.createBuffer({ size: NEWTON_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var jobsBuf = device.createBuffer({ size: jobsBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    var orbitBuf = device.createBuffer({ size: orbitBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var resultBuf = device.createBuffer({ size: resultBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var orbitReadBuf = device.createBuffer({ size: orbitBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    var resultReadBuf = device.createBuffer({ size: resultBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+
+    var module = device.createShaderModule({ code: NEWTON_ORBIT_WGSL });
+    var pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: module, entryPoint: 'main' } });
+    var bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: jobsBuf } },
+        { binding: 2, resource: { buffer: orbitBuf } },
+        { binding: 3, resource: { buffer: resultBuf } },
+      ],
+    });
+
+    orbitGPU = {
+      device: device,
+      jobCapacity: jobCount,
+      maxDepth: maxDepth,
+      jobsBytes: jobsBytes,
+      orbitBytes: orbitBytes,
+      resultBytes: resultBytes,
+      paramsBuf: paramsBuf,
+      jobsBuf: jobsBuf,
+      orbitBuf: orbitBuf,
+      resultBuf: resultBuf,
+      orbitReadBuf: orbitReadBuf,
+      resultReadBuf: resultReadBuf,
+      pipeline: pipeline,
+      bindGroup: bindGroup,
+      paramsBytes: new ArrayBuffer(NEWTON_GPU_PARAMS_BYTES),
+      jobsData: new Float32Array(jobCount * 4),
+    };
+    orbitGPUStatus = 'GPU';
+    return orbitGPU;
+  } catch (e) {
+    console.warn('Newtonbrot WebGPU orbit path disabled; falling back to CPU.', e);
+    orbitGPUDisabled = true;
+    orbitGPUStatus = 'CPU fallback';
+    destroyOrbitGPU();
+    return null;
+  }
+}
+
+function writeOrbitGPUParams(gpu, jobCount, maxDepth) {
+  var u = new Uint32Array(gpu.paramsBytes);
+  var f = new Float32Array(gpu.paramsBytes);
+  u[0] = jobCount >>> 0;
+  u[1] = maxDepth >>> 0;
+  u[2] = depthRed >>> 0;
+  u[3] = depthGreen >>> 0;
+  u[4] = depthBlue >>> 0;
+  u[5] = algMode >>> 0;
+  u[6] = mandelbrotAdd ? 1 : 0;
+  u[7] = doInverse ? 1 : 0;
+  u[8] = runtotal >>> 0;
+  u[9] = u[10] = u[11] = 0;
+  f[12] = order;
+  f[13] = imgOrder;
+  f[14] = complexError;
+  f[15] = rootBoundary;
+  gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
+}
+
+function buildOrbitGPUJobs(gpu, jobCount) {
+  var jobs = gpu.jobsData;
+  if (byStructure) {
+    for (var i = 0; i < numPoints; i++) {
+      var o = i * 4;
+      jobs[o] = smartX[0][i];
+      jobs[o + 1] = smartY[0][i];
+      jobs[o + 2] = depthRed;
+      jobs[o + 3] = 0;
+    }
+  } else {
+    var depths = [depthRed, depthGreen, depthBlue];
+    for (var ch = 0; ch < 3; ch++) {
+      for (var p = 0; p < numPoints; p++) {
+        var j = ch * numPoints + p;
+        var oj = j * 4;
+        jobs[oj] = smartX[ch][p];
+        jobs[oj + 1] = smartY[ch][p];
+        jobs[oj + 2] = depths[ch];
+        jobs[oj + 3] = ch;
+      }
+    }
+  }
+  gpu.device.queue.writeBuffer(gpu.jobsBuf, 0, jobs.buffer, 0, jobCount * 4 * 4);
+}
+
+async function calcOrbitBatchGPU() {
+  var maxDepth = Math.max(depthRed, depthGreen, depthBlue, 1) | 0;
+  var jobCount = byStructure ? numPoints : numPoints * 3;
+  ensureOrbitScratch(maxDepth);
+
+  var gpu = await initOrbitGPU(jobCount, maxDepth);
+  if (!gpu) return null;
+
+  writeOrbitGPUParams(gpu, jobCount, maxDepth);
+  buildOrbitGPUJobs(gpu, jobCount);
+
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  var pass = encoder.beginComputePass();
+  pass.setPipeline(gpu.pipeline);
+  pass.setBindGroup(0, gpu.bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(jobCount / NEWTON_GPU_WORKGROUP));
+  pass.end();
+  encoder.copyBufferToBuffer(gpu.orbitBuf, 0, gpu.orbitReadBuf, 0, jobCount * maxDepth * 2 * 4);
+  encoder.copyBufferToBuffer(gpu.resultBuf, 0, gpu.resultReadBuf, 0, jobCount * 4 * 4);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+
+  await Promise.all([
+    gpu.orbitReadBuf.mapAsync(GPUMapMode.READ, 0, jobCount * maxDepth * 2 * 4),
+    gpu.resultReadBuf.mapAsync(GPUMapMode.READ, 0, jobCount * 4 * 4),
+  ]);
+
+  var orbitRange = gpu.orbitReadBuf.getMappedRange(0, jobCount * maxDepth * 2 * 4);
+  var resultRange = gpu.resultReadBuf.getMappedRange(0, jobCount * 4 * 4);
+  return {
+    jobCount: jobCount,
+    maxDepth: maxDepth,
+    orbits: new Float32Array(orbitRange),
+    results: new Float32Array(resultRange),
+    release: function() {
+      try { gpu.orbitReadBuf.unmap(); } catch(e) {}
+      try { gpu.resultReadBuf.unmap(); } catch(e) {}
+    },
+  };
+}
+
+function copyGPUOrbitToCache(batch, jobIdx, iter) {
+  var base = jobIdx * batch.maxDepth * 2;
+  for (var j = 0; j < iter; j++) {
+    imgCacheRe[j] = batch.orbits[base + j * 2];
+    imgCacheIm[j] = batch.orbits[base + j * 2 + 1];
+  }
+}
+
+function solutionColorFromGPUResult(batch, jobIdx, iter) {
+  var r = jobIdx * 4;
+  if (iter !== depthRed || (doInverse && runtotal > 25)) {
+    if (mandelbrotAdd) return batch.results[r + 3];
+    var curroot = addRootWithBoundary(
+      {re: batch.results[r + 1], im: batch.results[r + 2]},
+      rootBoundary
+    );
+    return (curroot * 254) / Math.max(1, roots.length);
+  }
+  return 0;
+}
+
+function sanitizeGPUIter(batch, jobIdx, depth) {
+  var iter = batch.results[jobIdx * 4] | 0;
+  if (iter < 0) iter = 0;
+  if (iter > depth) iter = depth;
+  if (iter > batch.maxDepth) iter = batch.maxDepth;
+  return iter;
+}
+
+// ---------------------------------------------------------------------------
 // Root catalogue (for palette-based colouring)
 // ---------------------------------------------------------------------------
 
 function addRoot(z) {
-  var colorFactor = 2.0 / rootBoundary;
+  return addRootWithBoundary(z, rootBoundary);
+}
+
+function addRootWithBoundary(z, boundary) {
+  if (!isFinite(z.re) || !isFinite(z.im)) return 0;
+  var colorFactor = 2.0 / boundary;
   var minDist = 1e10;
   var closest = 0;
 
   for (var idx = 0; idx < roots.length; idx++) {
     var d = cdist(z, roots[idx]);
     if (d < minDist) { minDist = d; closest = idx; }
-    if (d <= rootBoundary * 1.1) {
+    if (d <= boundary * 1.1) {
       var retVal = idx + colorFactor * d;
       return Math.min(roots.length - 1, retVal);
     }
@@ -454,7 +832,6 @@ function drawOrbitChannel(iter, imgChannel) {
 
 function drawOrbitStructure(iter, amtR, amtG, amtB) {
   var close = 0.001;
-  var s2 = quadSize >> 1;
   var counter = 0;
 
   for (var j = 0; j < iter; j++) {
@@ -479,27 +856,6 @@ function drawOrbitStructure(iter, amtR, amtG, amtB) {
         imgRed[idx]   += amtR * 10;
         imgGreen[idx] += amtG * 10;
         imgBlue[idx]  += amtB * 10;
-
-        // Low-res block fill during early passes
-        if (runtotal > 50 && runtotal < LOW_RES_PASSES && quadSize > 14) {
-          var lo = 7, hi = quadSize - 7;
-          for (var k = lo; k < hi; k++) {
-            for (var m = lo; m < hi; m++) {
-              var nx = px + k - s2;
-              var ny = py + m - s2;
-              if (nx >= 0 && ny >= 0 && nx < ximlen && ny < yimlen) {
-                var nidx = ny * ximlen + nx;
-                var sparseColor = 2 - imgAlpha[nidx] > 0;
-                if (sparseColor) {
-                  imgAlpha[nidx] ++;
-                  imgRed[nidx]   += amtR;
-                  imgGreen[nidx] += amtG;
-                  imgBlue[nidx]  += amtB;
-                }
-              }
-            }
-          }
-        }
       }
     }
   }
@@ -589,7 +945,41 @@ function calcAvgScore() {
 // Per-frame computation (port of Java nextpoints)
 // ---------------------------------------------------------------------------
 
-function nextPoints() {
+function paletteAmounts(solColor) {
+  var baseColor = Math.floor(solColor) | 0;
+  var frac = solColor - baseColor;
+  var pal = palettes[palIndex % palettes.length];
+  var c0 = pal[baseColor] ?? pal[254];
+  var c1 = pal[baseColor+1] ?? pal[0];
+  return [
+    ((1-frac)*c0[0] + frac*c1[0]) | 0,
+    ((1-frac)*c0[1] + frac*c1[1]) | 0,
+    ((1-frac)*c0[2] + frac*c1[2]) | 0,
+  ];
+}
+
+function finishNextPoints() {
+  runtotal++;
+
+  // Periodic score recalibration
+  if (runtotal % 5 === 0) {
+    var denom = accepted + rejected;
+    var pctAccepted = denom > 0 ? Math.round(accepted * 100 / denom) : 0;
+    accepted = rejected = 0;
+    calcAvgScore();
+
+    var now = Date.now();
+    if (now - lastStatusTime > 1000) {
+      updateStatus(orbitGPUStatus + ' Pass: ' + runtotal + '  Accept: ' + pctAccepted + '%  Roots: ' + roots.length);
+      lastStatusTime = now;
+    }
+  }
+
+  if (runtotal % 5000 === 0) resetSmartPoints();
+}
+
+function nextPointsCPU() {
+  ensureOrbitScratch(Math.max(depthRed, depthGreen, depthBlue, 1) | 0);
   for (var i = 0; i < numPoints; i++) {
     var counter;
 
@@ -601,15 +991,8 @@ function nextPoints() {
       var converged = (iter === depthRed && doInverse) || (iter < depthRed && !doInverse);
       if (converged) {
         // Interpolate palette colour
-        var baseColor = Math.floor(solColor) | 0;
-        var frac = solColor - baseColor;
-        var pal = palettes[palIndex % palettes.length];
-        var c0 = pal[baseColor] ?? pal[254];
-        var c1 = pal[baseColor+1] ?? pal[0];
-        var amtR = ((1-frac)*c0[0] + frac*c1[0]) | 0;
-        var amtG = ((1-frac)*c0[1] + frac*c1[1]) | 0;
-        var amtB = ((1-frac)*c0[2] + frac*c1[2]) | 0;
-        counter = drawOrbitStructure(iter, amtR, amtG, amtB);
+        var amt = paletteAmounts(solColor);
+        counter = drawOrbitStructure(iter, amt[0], amt[1], amt[2]);
       } else {
         counter = 0;
       }
@@ -639,49 +1022,78 @@ function nextPoints() {
     }
   }
 
-  runtotal++;
-
-  // Fading passes during early refinement
-  if (runtotal > 100 && runtotal <= LOW_RES_PASSES+100 && runtotal % 50 === 40) {
-    ensureBlack();
-  }
-
-  // Periodic score recalibration
-  if (runtotal % 5 === 0) {
-    var denom = accepted + rejected;
-    var pctAccepted = denom > 0 ? Math.round(accepted * 100 / denom) : 0;
-    accepted = rejected = 0;
-    calcAvgScore();
-
-    var now = Date.now();
-    if (now - lastStatusTime > 1000) {
-      updateStatus('Pass: ' + runtotal + '  Accept: ' + pctAccepted + '%  Roots: ' + roots.length);
-      lastStatusTime = now;
-    }
-  }
-
-  if (runtotal % 5000 === 0) resetSmartPoints();
+  orbitGPUStatus = 'CPU';
+  finishNextPoints();
 }
 
-// ---------------------------------------------------------------------------
-// Periodic fading (port of Java ensureBlack)
-// ---------------------------------------------------------------------------
+async function nextPointsGPU(gen) {
+  if (orbitGPUDisabled || !isOrbitWebGPUSupported()) return false;
 
-function ensureBlack() {
-  var total = ximlen * yimlen;
-  for (var idx = 0; idx < total; idx++) {
-    var a = imgAlpha[idx];
-    if (a > 0) {
-      imgRed[idx]   -= imgRed[idx]   / a;
-      imgGreen[idx] -= imgGreen[idx] / a;
-      imgBlue[idx]  -= imgBlue[idx]  / a;
-    }
-    imgRed[idx]   /= 1.01;
-    imgGreen[idx] /= 1.01;
-    imgBlue[idx]  /= 1.01;
-    imgAlpha[idx] /= 1.01;
+  var batch = null;
+  try {
+    batch = await calcOrbitBatchGPU();
+  } catch (e) {
+    console.warn('Newtonbrot WebGPU orbit batch failed; falling back to CPU.', e);
+    orbitGPUDisabled = true;
+    orbitGPUStatus = 'CPU fallback';
+    try { if (batch) batch.release(); } catch(ex) {}
+    destroyOrbitGPU();
+    return false;
   }
-  quadSize = Math.max(0, quadSize - 2);
+  if (!batch) return false;
+
+  try {
+    if (!running || gen !== renderGeneration) return true;
+
+    var counter;
+    if (byStructure) {
+      for (var i = 0; i < numPoints; i++) {
+        var iter = sanitizeGPUIter(batch, i, depthRed);
+        var solColor = solutionColorFromGPUResult(batch, i, iter);
+        var converged = (iter === depthRed && doInverse) || (iter < depthRed && !doInverse);
+        if (converged) {
+          copyGPUOrbitToCache(batch, i, iter);
+          var amt = paletteAmounts(solColor);
+          counter = drawOrbitStructure(iter, amt[0], amt[1], amt[2]);
+        } else {
+          counter = 0;
+        }
+        updateScore(counter, 0, i);
+      }
+    } else {
+      var depths = [depthRed, depthGreen, depthBlue];
+      var channels = [imgRed, imgGreen, imgBlue];
+      for (var p = 0; p < numPoints; p++) {
+        for (var ch = 0; ch < 3; ch++) {
+          var jobIdx = ch * numPoints + p;
+          var depth = depths[ch];
+          var it = sanitizeGPUIter(batch, jobIdx, depth);
+          solutionColorFromGPUResult(batch, jobIdx, it); // preserve calcOrbit's root-catalog side effect
+          var conv = (it === depth && doInverse) || (it < depth && !doInverse);
+          if (conv) {
+            copyGPUOrbitToCache(batch, jobIdx, it);
+            counter = drawOrbitChannel(it, channels[ch]);
+          } else {
+            counter = 0;
+          }
+          updateScore(counter, ch, p);
+        }
+      }
+    }
+
+    orbitGPUStatus = 'GPU';
+    finishNextPoints();
+    return true;
+  } finally {
+    batch.release();
+  }
+}
+
+async function nextPoints(gen) {
+  var usedGPU = await nextPointsGPU(gen);
+  if (!usedGPU && running && gen === renderGeneration) {
+    nextPointsCPU();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -750,8 +1162,10 @@ function updateHistogram() {
 // Render loop
 // ---------------------------------------------------------------------------
 
-function renderFrame() {
-  nextPoints();
+async function renderFrame(gen) {
+  if (!running || gen !== renderGeneration) return;
+  await nextPoints(gen);
+  if (!running || gen !== renderGeneration) return;
 
   var now = Date.now();
   if (now - lastUpdateTime > 200) {
@@ -759,17 +1173,22 @@ function renderFrame() {
     lastUpdateTime = now;
   }
 
-  if (running) renderTimer = setTimeout(renderFrame, 0);
+  if (running && gen === renderGeneration) {
+    renderTimer = setTimeout(function() { renderFrame(gen); }, 0);
+  }
 }
 
 function startRendering() {
   running = true;
+  renderGeneration++;
+  var gen = renderGeneration;
   if (renderTimer) clearTimeout(renderTimer);
-  renderTimer = setTimeout(renderFrame, 0);
+  renderTimer = setTimeout(function() { renderFrame(gen); }, 0);
 }
 
 function stopRendering() {
   running = false;
+  renderGeneration++;
   if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
 }
 
@@ -796,7 +1215,8 @@ function resetAndDraw() {
   depthRed     = 200;
   depthGreen   = 140;
   depthBlue    = 40;
-  numPoints    = 1000;
+  numPoints    = 8192;
+  rootBoundary  = 7e-7;
   algMode      = 0;
   doInverse    = false;
   byStructure  = true;
@@ -880,7 +1300,6 @@ function setupMouse() {
 
   window.onresize = function() {
     initCanvas();
-    draw(false);
   };
 }
 
@@ -901,18 +1320,26 @@ function main() {
     link.click();
   };
 
-  // Re-render on any control change
-  const redrawWithRoots  = ['order','imgOrder','complexError','algMode'];
-  const redrawNoRoots    = ['zoom','xcen','ycen','numPoints','palIndex'];
+  // Re-render on any control change.  Depth changes affect orbit length, and
+  // viewport changes affect where cached orbits accumulate, so both clear the
+  // current histogram and restart rendering without rebuilding the root list.
+  const redrawWithRoots  = ['order','imgOrder','complexError','rootBoundary','algMode'];
+  const redrawNoRoots    = ['zoom','xcen','ycen','depthRed','depthGreen','depthBlue','palIndex'];
   const toggleWithRoots  = ['mandelbrotAdd'];
   const toggleNoRoots    = ['doInverse','byStructure'];
-  const noReset = ['depthRed','depthGreen','depthBlue'];
 
-  redrawWithRoots.forEach(function(id) { $(id).onchange = function() { draw(true); }; });
-  redrawNoRoots.forEach(function(id)   { $(id).onchange = function() { draw(false); }; });
-  toggleWithRoots.forEach(function(id) { $(id).onchange = function() { draw(true); }; });
-  toggleNoRoots.forEach(function(id)   { $(id).onchange = function() { draw(false); }; });
-  noReset.forEach(function(id)   { $(id).onkeydown = function() { readControls() }; });
+  function bindChange(id, handler) {
+    var el = $(id);
+    if (el) el.onchange = handler;
+  }
+
+  redrawWithRoots.forEach(function(id) { bindChange(id, function() { draw(true); }); });
+  redrawNoRoots.forEach(function(id)   { bindChange(id, function() { draw(false); }); });
+  toggleWithRoots.forEach(function(id) { bindChange(id, function() { draw(true); }); });
+  toggleNoRoots.forEach(function(id)   { bindChange(id, function() { draw(false); }); });
+  if ($('rootBoundary')) {
+    $('rootBoundary').oninput = function() { readControls(); };
+  }
   $('contrastSlider').onchange  = function() { readControls(); updateHistogram(); };
   $('brightnessSlider').onchange = function() { readControls(); updateHistogram(); };
 
