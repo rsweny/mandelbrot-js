@@ -189,17 +189,17 @@ function updateRootBoundaryLabel() {
 }
 
 function readControls() {
-  try { zoom         = parseFloat($('zoom').value)         || 6;    } catch(e){}
-  try { xcen         = parseFloat($('xcen').value)         || 0.1;  } catch(e){}
-  try { ycen         = parseFloat($('ycen').value)         || 0;    } catch(e){}
-  try { order        = parseFloat($('order').value)        || 4.9;  } catch(e){}
-  try { imgOrder     = parseFloat($('imgOrder').value)     || 0.48; } catch(e){}
-  try { complexError = parseFloat($('complexError').value) || 1;    } catch(e){}
+  try { zoom         = parseFloat($('zoom').value)         ?? 6;    } catch(e){}
+  try { xcen         = parseFloat($('xcen').value)         ?? 0.1;  } catch(e){}
+  try { ycen         = parseFloat($('ycen').value)         ?? 0;    } catch(e){}
+  try { order        = parseFloat($('order').value)        ?? 4.9;  } catch(e){}
+  try { imgOrder     = parseFloat($('imgOrder').value)     ?? 0.48; } catch(e){}
+  try { complexError = parseFloat($('complexError').value) ?? 1;    } catch(e){}
   gradient   = $('contrastSlider').value / 100;
   brightness = $('brightnessSlider').value / 100;
-  try { depthRed     = parseInt($('depthRed').value, 10)   || 200;  } catch(e){}
-  try { depthGreen   = parseInt($('depthGreen').value, 10) || 140;  } catch(e){}
-  try { depthBlue    = parseInt($('depthBlue').value, 10)  || 40;   } catch(e){}
+  try { depthRed     = parseInt($('depthRed').value, 10)   ?? 200;  } catch(e){}
+  try { depthGreen   = parseInt($('depthGreen').value, 10) ?? 140;  } catch(e){}
+  try { depthBlue    = parseInt($('depthBlue').value, 10)  ?? 40;   } catch(e){}
   try { rootBoundary = sliderToRootBoundary($('rootBoundary').value) || 7e-7; } catch(e){}
   updateRootBoundaryLabel();
   algMode       = parseInt($('algMode').value, 10);

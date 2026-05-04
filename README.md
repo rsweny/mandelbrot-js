@@ -94,9 +94,3 @@ With some elementary logarithm rules, we can simplify this to
 
 which is faster.  The constant `5` is another little trick, which should
 be explained in the code itself.
-
-
-### Older Versions
-
-http://cabin.stasis.org/mandelbrot.html | http://cabin.stasis.org/buddhabrot.html | http://cabin.stasis.org/newton.html
-

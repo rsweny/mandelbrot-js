@@ -76,15 +76,30 @@ struct Params {
 // x=hue, y=iteration count, z=final real, w=final imaginary
 @group(0) @binding(1) var<storage, read_write> outPixels: array<vec4<f32>>;
 
+const NEWTON_EXP_LIMIT: f32 = 42.0;
+const NEWTON_VALUE_LIMIT: f32 = 1.0e18;
+const NEWTON_STEP_LIMIT: f32 = 1.0e12;
+const NEWTON_MIN_DENOM: f32 = 1.0e-30;
+
+fn finiteVec(v: vec2<f32>) -> bool {
+  return all(v == v) && all(abs(v) <= vec2<f32>(NEWTON_VALUE_LIMIT));
+}
+
+fn clampVec(v: vec2<f32>, limit: f32) -> vec2<f32> {
+  if (!all(v == v)) { return vec2<f32>(0.0, 0.0); }
+  return clamp(v, vec2<f32>(-limit), vec2<f32>(limit));
+}
+
 fn cadd(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a + b; }
 fn csub(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> { return a - b; }
 fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 fn cdiv(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
-  let d = b.x * b.x + b.y * b.y;
-  if (d == 0.0) { return vec2<f32>(0.0 / d, 0.0 / d); }
-  return vec2<f32>((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+  if (!finiteVec(a) || !finiteVec(b)) { return vec2<f32>(0.0, 0.0); }
+  let d = max(b.x * b.x + b.y * b.y, NEWTON_MIN_DENOM);
+  let q = vec2<f32>((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+  return clampVec(q, NEWTON_VALUE_LIMIT);
 }
 fn clog(z: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(log(length(z)), atan2(z.y, z.x));
@@ -93,9 +108,15 @@ fn cpow(z: vec2<f32>, w: vec2<f32>) -> vec2<f32> {
   if (z.x == 0.0 && z.y == 0.0) { return vec2<f32>(0.0, 0.0); }
   let logr = log(length(z));
   let theta = atan2(z.y, z.x);
-  let newR = exp(w.x * logr - w.y * theta);
+  let newR = exp(clamp(w.x * logr - w.y * theta, -NEWTON_EXP_LIMIT, NEWTON_EXP_LIMIT));
   let newTheta = w.y * logr + w.x * theta;
-  return vec2<f32>(newR * cos(newTheta), newR * sin(newTheta));
+  return clampVec(vec2<f32>(newR * cos(newTheta), newR * sin(newTheta)), NEWTON_VALUE_LIMIT);
+}
+
+fn applyNewtonStep(z: vec2<f32>, correction: vec2<f32>) -> vec2<f32> {
+  let next = z - clampVec(correction, NEWTON_STEP_LIMIT);
+  if (!finiteVec(next)) { return clampVec(z, NEWTON_VALUE_LIMIT); }
+  return next;
 }
 
 fn hash01(v: u32) -> f32 {
@@ -116,14 +137,15 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
 
   switch (P.mode) {
     case 0u: {
-      let f = csub(cpow(z, expo), one);
-      let df = cmul(expo, cpow(z, expM1));
-      return csub(z, cdiv(f, df));
+	      let scale = cpow(z, csub(oneError, expo));
+	      let correction = cdiv(csub(cpow(z, oneError), scale), expo);
+	      return applyNewtonStep(z, correction);
     }
     case 1u: {
-      let f = csub(cpow(z, expo), cdiv(one, z));
-      let df = cadd(cmul(expo, cpow(z, expM1)), cpow(z, vec2<f32>(-2.0, 0.0)));
-      return csub(z, cdiv(f, df));
+	      let scale = cpow(z, csub(oneError, expo));
+	      let f = csub(cpow(z, oneError), cmul(cdiv(one, z), scale));
+	      let df = cadd(expo, cmul(cpow(z, vec2<f32>(-2.0, 0.0)), scale));
+	      return applyNewtonStep(z, cdiv(f, df));
     }
     case 2u: {
       let ten = vec2<f32>(10.0, 0.0);
@@ -131,20 +153,27 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
       let p2i = vec2<f32>(0.0, 0.2);
       let f = csub(cadd(cpow(z, ten), cmul(p2i, cpow(z, expo))), one);
       let df = cadd(cmul(ten, cpow(z, nine)), cmul(cmul(p2i, expo), cpow(z, expM1)));
-      return csub(z, cdiv(f, df));
+	      return applyNewtonStep(z, cdiv(f, df));
     }
     case 3u: {
-      let f = cadd(csub(cmul(two, cpow(z, expo)), seed), one);
-      let df = csub(cmul(cmul(two, expo), cpow(z, expM1)), one);
-      return csub(z, cdiv(f, df));
+	      let scale = cpow(z, csub(oneError, expo));
+	      let f = cadd(cmul(two, cpow(z, oneError)), cmul(csub(one, seed), scale));
+	      let df = csub(cmul(two, expo), scale);
+	      return applyNewtonStep(z, cdiv(f, df));
     }
     case 4u: {
       let c = vec2<f32>(1.0 + P.order, P.imgOrder);
       let cMinus1Im = select(P.imgOrder - 1.0, 0.0, P.imgOrder == 0.0);
       let cMinus1 = vec2<f32>(P.order, cMinus1Im);
-      let f = cadd(csub(cpow(z, c), z), pointOne);
-      let df = csub(cmul(c, cpow(z, cMinus1)), one);
-      return csub(z, cdiv(f, df));
+	      if (P.imgOrder == 0.0) {
+	        let scale = cpow(z, vec2<f32>(-P.order, 0.0));
+	        let f = cadd(csub(z, cmul(z, scale)), cmul(pointOne, scale));
+	        let df = csub(c, scale);
+	        return applyNewtonStep(z, cdiv(f, df));
+	      }
+	      let f = cadd(csub(cpow(z, c), z), pointOne);
+	      let df = csub(cmul(c, cpow(z, cMinus1)), one);
+	      return applyNewtonStep(z, cdiv(f, df));
     }
     case 5u: {
       let three = vec2<f32>(3.0, 0.0);
@@ -155,14 +184,14 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
       let eighteen = vec2<f32>(18.0, 0.0);
       let f = cadd(csub(cadd(csub(cpow(z, expo), cmul(three, cpow(z, five))), cmul(six, cpow(z, three))), cmul(three, z)), three);
       let df = csub(cadd(csub(cmul(expo, cpow(z, expM1)), cmul(fifteen, cpow(z, four))), cmul(eighteen, cpow(z, two))), three);
-      return csub(z, cdiv(f, df));
+	      return applyNewtonStep(z, cdiv(f, df));
     }
     default: {
       let con = vec2<f32>(P.order, P.imgOrder);
       let zToZ = cpow(z, z);
       let f = csub(zToZ, cmul(con, z));
       let df = csub(cmul(zToZ, cadd(one, clog(z))), con);
-      return csub(z, cdiv(f, df));
+	      return applyNewtonStep(z, cdiv(f, df));
     }
   }
 }
@@ -211,8 +240,7 @@ var NEWTON_GPU_PARAMS_BYTES = 64;
 var NEWTON_GPU_WORKGROUP_X = 16;
 var NEWTON_GPU_WORKGROUP_Y = 16;
 
-function isNewtonWebGPUSupported()
-{
+function isNewtonWebGPUSupported() {
   return typeof navigator !== 'undefined' && !!navigator.gpu;
 }
 
@@ -343,13 +371,8 @@ ccanvas.height = window.innerHeight;
 var ctx = canvas.getContext('2d');
 var img = ctx.createImageData(canvas.width, 1);
 
-/*
- * Just a shorthand function: Fetch given element, jQuery-style
- */
-function $(id)
-{
-	return document.getElementById(id);
-}
+// Just a shorthand function: Fetch given element, jQuery-style
+function $(id) { return document.getElementById(id) }
 
 function focusOnSubmit()
 {
@@ -357,11 +380,9 @@ function focusOnSubmit()
 	if ( e ) e.focus();
 }
 
-function getSamples()
-{
+function getSamples() {
 	// more than 4x anti-alias samples can overload the GPU
-	var i = Math.min(4, parseInt($('superSamples').value));
-	return !isFinite(i) || i <= 0 ? 2 : i;
+	return  Math.min(4, parseInt($('superSamples').value));
 }
 
 function iterateEquation(i, j, equation, derivative) 
@@ -381,7 +402,7 @@ function iterateEquation(i, j, equation, derivative)
 		if (mandelbrotAddition) z = z.add(Complex(i/2.0,j/2.0));	
 		n++;
 		
-		//normal smoothing
+		// normal smoothing
 		w = 1.0 / distance(z.sub(old), zero);
 		hue += Math.pow(1.05, -w);
 	}
@@ -442,7 +463,7 @@ function distance(a, b)
 function UnityFunction(z, i, j) 
 {
 	var exponent = Complex(order, img_order);
-	return z.cPow(exponent).sub( one );
+	return z.cPow(exponent).sub(one);
 }
 //Mode0: n*z^(n-1)
 function UnityDerivative(z, i, j) 
@@ -600,7 +621,6 @@ function draw(superSamples)
 	iterations = $("txtIterations").value;
 	roots = [];
 
-
 	if ( lookAt === null ) lookAt = [-0.6, 0];
 	if ( zoom === null ) zoom = [zoomStart, zoomStart];
 
@@ -642,15 +662,14 @@ function draw(superSamples)
 
 	function drawLineSuperSampled(Ci, off, Cr_init, Cr_step)
 	{
-		var Cr = Cr_init;
+		let Cr = Cr_init;
+		for ( let x=0; x < canvas.width; ++x, Cr += Cr_step ) {
+			let color = [0, 0, 0, 255];
 
-		for ( var x=0; x < canvas.width; ++x, Cr += Cr_step ) {
-			var color = [255, 255, 255, 255];
-
-			for ( var s=0; s<superSamples; ++s ) {
-				var rx = Math.random()*Cr_step;
-				var ry = Math.random()*Ci_step;
-				var p = iterateEquation(Cr - rx/2, Ci - ry/2, equation, derivative);
+			for (let s = 0; s < superSamples; ++s) {
+				let rx = Math.random()*Cr_step;
+				let ry = Math.random()*Ci_step;
+				let p = iterateEquation(Cr - rx/2, Ci - ry/2, equation, derivative);
 				color = addRGB(color, pickColor(p));
 			}
 
@@ -695,11 +714,11 @@ function draw(superSamples)
 			var angle = Math.atan(finalIm/finalRe);
 			angle = angle + (Math.PI / 2);
 			angle = angle / Math.PI;
-			hue = angle;
+			hue = initialColor + angle;
 		} else {
 			//limit the colors to 30% of the spectrum, unless a complex root
 			var limitfactor = 0.3;
-			if (img_order != 0) limitfactor = 1.0;
+			if (img_order != 0) limitfactor = 0.9;
 			hue = initialColor + (rootIndex*limitfactor) / roots.length;
 		}
 
@@ -742,7 +761,7 @@ function draw(superSamples)
 		var pixels = 0;
 		var Ci = yRange[0];
 		var sy = 0;
-		var drawLineFunc = superSamples>1? drawLineSuperSampled : drawLine;
+		var drawLineFunc = superSamples > 1 ? drawLineSuperSampled : drawLine;
 		var ourRenderId = renderId;
 
 		var scanline = function()
@@ -802,131 +821,131 @@ function draw(superSamples)
 		scanline();
 	}
 
-		async function renderGPU()
+	async function renderGPU()
+	{
+		if (newtonGPUInFlight) return false;
+		newtonGPUInFlight = true;
+
+		var start = (new Date).getTime();
+		var startHeight = canvas.height;
+		var startWidth = canvas.width;
+		var ourRenderId = renderId;
+		var requestedSamples = superSamples;
+
+		function renderIsCurrent()
 		{
-			if (newtonGPUInFlight) return false;
-			newtonGPUInFlight = true;
+			return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
+		}
 
-			var start = (new Date).getTime();
-			var startHeight = canvas.height;
-			var startWidth = canvas.width;
-			var ourRenderId = renderId;
-			var requestedSamples = superSamples;
+		function paintGPUBatch(batch)
+		{
+			if (!renderIsCurrent()) return true;
 
-			function renderIsCurrent()
-			{
-				return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
-			}
+			var gpuImg = ctx.createImageData(canvas.width, canvas.height);
+			var data = gpuImg.data;
+			var pixels = batch.pixels;
+			var iterationLimit = parseInt(iterations) ?? 20;
+			var sampleCount = batch.samples;
 
-			function paintGPUBatch(batch)
-			{
-				if (!renderIsCurrent()) return true;
+			for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
+				var colorSum = [0, 0, 0, 255];
 
-				var gpuImg = ctx.createImageData(canvas.width, canvas.height);
-				var data = gpuImg.data;
-				var pixels = batch.pixels;
-				var iterationLimit = parseInt(iterations, 10) || 0;
-				var sampleCount = batch.samples;
+				for (var s = 0; s < sampleCount; s++) {
+					var poff = (idx * sampleCount + s) * 4;
+					var hue = pixels[poff];
+					var n = Math.round(pixels[poff + 1]);
+					var zre = pixels[poff + 2];
+					var zim = pixels[poff + 3];
+					var rootIndex = 0;
+					var iter0 = n;
 
-				for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
-					var colorSum = [0, 0, 0, 255];
-
-					for (var s = 0; s < sampleCount; s++) {
-						var poff = (idx * sampleCount + s) * 4;
-						var hue = pixels[poff];
-						var n = Math.round(pixels[poff + 1]);
-						var zre = pixels[poff + 2];
-						var zim = pixels[poff + 3];
-						var rootIndex = 0;
-						var iter0 = n;
-
-						if (!isFinite(hue) || !isFinite(n) || !isFinite(zre) || !isFinite(zim)) {
-							// GPU overflow/poles can produce NaN/Infinity; ImageData turns NaN colour channels into black, so treat these as non-converged white samples.
-							colorSum = addRGB(colorSum, [255,255,255,255]);
-							continue;
-						}
-
-						if (n == iterationLimit) {
-							// Match the CPU renderer: samples that hit the iteration limit are interior/non-converged and should be white.
-							if (mandelbrotAddition || mode == 3) {
-								colorSum = addRGB(colorSum, [0,0,0,255]);
-							} else {
-								colorSum = addRGB(colorSum, [255,255,255,255]);
-							}
-							continue;
-						}
-
-						if (n != iterationLimit) {
-							iter0 = hue;
-							rootIndex = addRoot({re: zre, i: zim});
-						}
-
-						colorSum = addRGB(colorSum, pickColorValues(iter0, rootIndex, zre, zim));
+					if (!isFinite(hue) || !isFinite(n) || !isFinite(zre) || !isFinite(zim)) {
+						// GPU overflow/poles can produce NaN/Infinity; ImageData turns NaN colour channels into black, so treat these as non-converged white samples.
+						colorSum = addRGB(colorSum, [255,255,255,255]);
+						continue;
 					}
 
-					var color = divRGB(colorSum, sampleCount);
-					var outOff = idx * 4;
+					if (n == iterationLimit) {
+						// Match the CPU renderer: samples that hit the iteration limit are interior/non-converged and should be white.
+						if (mandelbrotAddition || mode == 3) {
+							colorSum = addRGB(colorSum, [0,0,0,255]);
+						} else {
+							colorSum = addRGB(colorSum, [255,255,255,255]);
+						}
+						continue;
+					}
 
-					data[outOff] = color[0];
-					data[outOff + 1] = color[1];
-					data[outOff + 2] = color[2];
-					data[outOff + 3] = 255;
+					if (n != iterationLimit) {
+						iter0 = hue;
+						rootIndex = addRoot({re: zre, i: zim});
+					}
+
+					colorSum = addRGB(colorSum, pickColorValues(iter0, rootIndex, zre, zim));
 				}
 
-				if (!renderIsCurrent()) return true;
-				ctx.putImageData(gpuImg, 0, 0);
-				return true;
+				var color = divRGB(colorSum, sampleCount);
+				var outOff = idx * 4;
+
+				data[outOff] = color[0];
+				data[outOff + 1] = color[1];
+				data[outOff + 2] = color[2];
+				data[outOff + 3] = 255;
 			}
 
-			async function runGPUPass(samplesForPass)
-			{
-				var batch = null;
-				try {
-					batch = await calcNewtonPixelsGPU(canvas.width, canvas.height, dx, dy, samplesForPass);
-				} catch (e) {
-					console.warn('Newton WebGPU render failed; falling back to CPU.', e);
-					newtonGPUDisabled = true;
-					newtonGPUStatus = 'CPU fallback';
-					destroyNewtonGPU();
-					return false;
-				}
+			if (!renderIsCurrent()) return true;
+			ctx.putImageData(gpuImg, 0, 0);
+			return true;
+		}
 
-				if (!batch) return false;
-				try {
-					return paintGPUBatch(batch);
-				} finally {
-					batch.release();
-				}
-			}
-
+		async function runGPUPass(samplesForPass)
+		{
+			var batch = null;
 			try {
-				// First pass deliberately uses one sample to discover roots quickly.
-				// The second pass keeps those roots and recolours the full image.
-				if (!await runGPUPass(1)) return false;
-				if (!renderIsCurrent()) return true;
-				if (!await runGPUPass(requestedSamples)) return false;
+				batch = await calcNewtonPixelsGPU(canvas.width, canvas.height, dx, dy, samplesForPass);
+			} catch (e) {
+				console.warn('Newton WebGPU render failed; falling back to CPU.', e);
+				newtonGPUDisabled = true;
+				newtonGPUStatus = 'CPU fallback';
+				destroyNewtonGPU();
+				return false;
+			}
 
-				var elapsedMS = Math.max(1, (new Date).getTime() - start);
-				$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1);
-				$('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
-				$('renderSpeedUnit').innerHTML = 'second (GPU)';
-				newtonGPUStatus = 'GPU';
-				return true;
+			if (!batch) return false;
+			try {
+				return paintGPUBatch(batch);
 			} finally {
-				newtonGPUInFlight = false;
+				batch.release();
 			}
 		}
 
-			if (!newtonGPUDisabled && isNewtonWebGPUSupported()) {
-			var fallbackRenderId = renderId;
-			renderGPU().then(function(usedGPU) {
-				if (!usedGPU && renderId == fallbackRenderId) {
-					render();
-				}
-			});
-		} else {
-			render();
+		try {
+			// First pass deliberately uses one sample to discover roots quickly.
+			// The second pass keeps those roots and recolours the full image.
+			if (!await runGPUPass(1)) return false;
+			if (!renderIsCurrent()) return true;
+			if (!await runGPUPass(requestedSamples)) return false;
+
+			var elapsedMS = Math.max(1, (new Date).getTime() - start);
+			$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1);
+			$('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
+			$('renderSpeedUnit').innerHTML = 'second (GPU)';
+			newtonGPUStatus = 'GPU';
+			return true;
+		} finally {
+			newtonGPUInFlight = false;
 		}
+	}
+
+	if (!newtonGPUDisabled && isNewtonWebGPUSupported()) {
+		var fallbackRenderId = renderId;
+		renderGPU().then(function(usedGPU) {
+			if (!usedGPU && renderId == fallbackRenderId) {
+				render();
+			}
+		});
+	} else {
+		render();
+	}
 }
 
 // Some constants used with smoothColor
