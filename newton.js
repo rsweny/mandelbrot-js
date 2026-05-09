@@ -453,11 +453,9 @@ function addRoot(root)
 	return roots.length - 1;
 }
 
-function distance(a, b) 
-{
+function distance(a, b) {
 	return Math.sqrt((a.re-b.re)*(a.re-b.re) + (a.i-b.i)*(a.i-b.i));
 }
-
 
 //Mode0: z^n - 1 = 0
 function UnityFunction(z, i, j) 
@@ -473,7 +471,6 @@ function UnityDerivative(z, i, j)
 	return exponent.mult( z.cPow(exponentLessOne) );
 }
 	
-
 //Mode1: z^n - 1 / z
 function DivZFunction(z, i, j)
 {
@@ -488,7 +485,6 @@ function DivZDerivative(z, i, j)
 	var exponentLessOne = exponent.sub(oneError);
 	return (exponent.mult( z.cPow(exponentLessOne) )).add( z.cPow(minusTwo) );
 }
-
 
 //Mode2: z^10 + 0.2i * z^5 - 1
 function Poly2Function(z, i, j)
@@ -530,7 +526,6 @@ function Poly3Function(z, i, j)
 	var c = Complex(1 + parseFloat(order), img_order);
 	return z.cPow(c).sub(z).add(pointone);
 }
-
 //Mode4: c*z^(c-1) - 1
 function Poly3Derivative(z, i, j)
 {
@@ -569,7 +564,6 @@ function PolyDerivative(z, i, j)
 		.sub( three );
 }
 
-
 //Mode6: z^z - c*z  (c = order + img_order*i)
 function ZZFunction(z, i, j)
 {
@@ -584,9 +578,6 @@ function ZZDerivative(z, i, j)
 	return z.cPow(z).mult(lnz).sub(con);
 }
 
-/*
- * Render the Mandelbrot set
- */
 function draw(superSamples)
 {
 	mode = $("mode").selectedIndex;
@@ -636,18 +627,14 @@ function draw(superSamples)
 
 	if ( reInitCanvas ) {
 		reInitCanvas = false;
-
 		canvas = $('canvasMandelbrot');
 		canvas.width  = window.innerWidth;
 		canvas.height = window.innerHeight;
-
 		ccanvas = $('canvasControls');
 		ccanvas.width  = window.innerWidth;
 		ccanvas.height = window.innerHeight;
-
 		ctx = canvas.getContext('2d');
 		img = ctx.createImageData(canvas.width, 1);
-
 		adjustAspectRatio(xRange, yRange, canvas);
 	}
 
@@ -777,18 +764,6 @@ function draw(superSamples)
 			ctx.putImageData(img, 0, sy);
 
 			var now = (new Date).getTime();
-
-			/*
-			 * Javascript is inherently single-threaded, and the way
-			 * you yield thread control back to the browser is MYSTERIOUS.
-			 *
-			 * People seem to use setTimeout() to yield, which lets us
-			 * make sure the canvas is updated, so that we can do animations.
-			 *
-			 * But if we do that for every scanline, it will take 100x longer
-			 * to render everything, because of overhead.  So therefore, we'll
-			 * do something in between.
-			 */
 			if ( sy++ < canvas.height ) {
 				if ( (now - lastUpdate) >= updateTimeout ) {
 					// show the user where we're rendering
@@ -875,11 +850,8 @@ function draw(superSamples)
 						continue;
 					}
 
-					if (n != iterationLimit) {
-						iter0 = hue;
-						rootIndex = addRoot({re: zre, i: zim});
-					}
-
+					iter0 = hue;
+					rootIndex = addRoot({re: zre, i: zim});
 					colorSum = addRGB(colorSum, pickColorValues(iter0, rootIndex, zre, zim));
 				}
 
@@ -988,14 +960,18 @@ function HSVtoRGB(h, s, v) {
 /*
  * Update URL's hash with render parameters so we can pass it around.
  */
+var lastWrittenHash = null;
+
 function updateHashTag(samples) {
 	var scheme = $('mode').value;
 	console.log("updateHashTag() " + iterations);
-	location.hash = 'zoom=' + zoom + '&lookAt=' + lookAt + '&iterations=' + iterations + '&superSamples=' + samples +
+	var h = 'zoom=' + zoom + '&lookAt=' + lookAt + '&iterations=' + iterations + '&superSamples=' + samples +
 		'&realExponent=' + encodeURIComponent($('real_exponent').value) +
 		'&complexExponent=' + encodeURIComponent($('complex_exponent').value) +
 		'&mandelbrot=' + ($('mandelbrot').checked ? '1' : '0') +
 		'&mode=' + scheme;
+	lastWrittenHash = h;
+	location.hash = h;
 }
 
 /*
@@ -1309,6 +1285,16 @@ function main()
 	window.onresize = function(event)
 	{
 		reInitCanvas = true;
+	};
+
+	/*
+	 * Re-render when the URL hash is edited manually.
+	 */
+	window.onhashchange = function()
+	{
+		if (location.hash.replace(/^#/, '') === lastWrittenHash) return;
+		if (readHashTag())
+			draw(getSamples());
 	};
 
 	/*

@@ -233,6 +233,116 @@ function writeControls() {
 function updateStatus(msg) { $('status').textContent = msg || ''; }
 
 // ---------------------------------------------------------------------------
+// URL hash persistence
+// ---------------------------------------------------------------------------
+
+var lastWrittenHash = null;
+
+function boolToHash(v) {
+  return v ? '1' : '0';
+}
+
+function parseHashBool(v) {
+  v = String(v).toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function updateHashTag() {
+  var h = [
+    'zoom=' + encodeURIComponent(zoom),
+    'xcen=' + encodeURIComponent(xcen),
+    'ycen=' + encodeURIComponent(ycen),
+    'order=' + encodeURIComponent(order),
+    'imgOrder=' + encodeURIComponent(imgOrder),
+    'complexError=' + encodeURIComponent(complexError),
+    'gradient=' + encodeURIComponent(gradient),
+    'brightness=' + encodeURIComponent(brightness),
+    'depthRed=' + encodeURIComponent(depthRed),
+    'depthGreen=' + encodeURIComponent(depthGreen),
+    'depthBlue=' + encodeURIComponent(depthBlue),
+    'rootBoundary=' + encodeURIComponent(rootBoundary),
+    'algMode=' + encodeURIComponent(algMode),
+    'doInverse=' + boolToHash(doInverse),
+    'byStructure=' + boolToHash(byStructure),
+    'mandelbrotAdd=' + boolToHash(mandelbrotAdd),
+    'palIndex=' + encodeURIComponent(palIndex)
+  ].join('&');
+
+  lastWrittenHash = h;
+  if (location.hash.replace(/^#/, '') !== h) location.hash = h;
+}
+
+function readHashNumber(params, key, setter, validator) {
+  if (!params.has(key)) return false;
+  var v = parseFloat(params.get(key));
+  if (!isFinite(v) || (validator && !validator(v))) return false;
+  setter(v);
+  return true;
+}
+
+function readHashInt(params, key, setter, validator) {
+  if (!params.has(key)) return false;
+  var v = parseInt(params.get(key), 10);
+  if (!isFinite(v) || (validator && !validator(v))) return false;
+  setter(v);
+  return true;
+}
+
+function readHashBool(params, key, setter) {
+  if (!params.has(key)) return false;
+  setter(parseHashBool(params.get(key)));
+  return true;
+}
+
+function readHashTag() {
+  var hash = location.hash.replace(/^#/, '');
+  if (!hash) return false;
+
+  var params = new URLSearchParams(hash);
+  var redraw = false;
+  var positive = function(v) { return v > 0; };
+  var nonNegative = function(v) { return v >= 0; };
+
+  if (params.has('lookAt')) {
+    var l = params.get('lookAt').split(',');
+    var lx = parseFloat(l[0]);
+    var ly = parseFloat(l[1]);
+    if (isFinite(lx) && isFinite(ly)) {
+      xcen = lx;
+      ycen = ly;
+      redraw = true;
+    }
+  }
+
+  redraw = readHashNumber(params, 'zoom', function(v) { zoom = v; }, positive) || redraw;
+  redraw = readHashNumber(params, 'xcen', function(v) { xcen = v; }) || redraw;
+  redraw = readHashNumber(params, 'ycen', function(v) { ycen = v; }) || redraw;
+  redraw = readHashNumber(params, 'order', function(v) { order = v; }) || redraw;
+  redraw = readHashNumber(params, 'imgOrder', function(v) { imgOrder = v; }) || redraw;
+  redraw = readHashNumber(params, 'complexError', function(v) { complexError = v; }) || redraw;
+  redraw = readHashNumber(params, 'gradient', function(v) { gradient = v; }, nonNegative) || redraw;
+  redraw = readHashNumber(params, 'contrast', function(v) { gradient = v; }, nonNegative) || redraw;
+  redraw = readHashNumber(params, 'brightness', function(v) { brightness = v; }, nonNegative) || redraw;
+  redraw = readHashInt(params, 'depthRed', function(v) { depthRed = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'depthGreen', function(v) { depthGreen = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'depthBlue', function(v) { depthBlue = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'red', function(v) { depthRed = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'green', function(v) { depthGreen = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'blue', function(v) { depthBlue = v; }, positive) || redraw;
+  redraw = readHashNumber(params, 'rootBoundary', function(v) { rootBoundary = v; }, positive) || redraw;
+  redraw = readHashInt(params, 'algMode', function(v) { algMode = v; }, function(v) { return v >= 0 && v <= 5; }) || redraw;
+  redraw = readHashBool(params, 'doInverse', function(v) { doInverse = v; }) || redraw;
+  redraw = readHashBool(params, 'inverse', function(v) { doInverse = v; }) || redraw;
+  redraw = readHashBool(params, 'byStructure', function(v) { byStructure = v; }) || redraw;
+  redraw = readHashBool(params, 'mandelbrotAdd', function(v) { mandelbrotAdd = v; }) || redraw;
+  redraw = readHashInt(params, 'palIndex', function(v) { palIndex = v; }, function(v) { return v >= 0 && v < palettes.length; }) || redraw;
+  redraw = readHashInt(params, 'palette', function(v) { palIndex = v; }, function(v) { return v >= 0 && v < palettes.length; }) || redraw;
+
+  if (redraw) writeControls();
+  return redraw;
+}
+
+// ---------------------------------------------------------------------------
 // Canvas init
 // ---------------------------------------------------------------------------
 
@@ -1200,6 +1310,7 @@ function draw(newRoots) {
   stopRendering();
   initCanvas();
   clearAndReset(newRoots !== false);
+  updateHashTag();
   startRendering();
 }
 
@@ -1224,6 +1335,10 @@ function resetAndDraw() {
   palIndex     = 0;
   writeControls();
   draw(true);
+  setTimeout(function() {
+    lastWrittenHash = '';
+    location.hash = '';
+  }, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -1340,9 +1455,15 @@ function main() {
   if ($('rootBoundary')) {
     $('rootBoundary').oninput = function() { readControls(); };
   }
-  $('contrastSlider').onchange  = function() { readControls(); updateHistogram(); };
-  $('brightnessSlider').onchange = function() { readControls(); updateHistogram(); };
+  $('brightnessSlider').onchange = function() { readControls(); updateHashTag(); updateHistogram(); };
+  $('contrastSlider').onchange  = function() { readControls(); updateHashTag(); updateHistogram(); };
 
+  window.onhashchange = function() {
+    if (location.hash.replace(/^#/, '') === lastWrittenHash) return;
+    if (readHashTag()) draw(true);
+  };
+
+  readHashTag();
   writeControls();
   draw(true);
 }
