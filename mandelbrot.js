@@ -22,6 +22,10 @@ var zoomStart = 3.4;
 var zoom = zoomStart;
 var lookAtDefault = [-0.6, 0.01];
 var lookAt = lookAtDefault;
+// Parallel 256-bit fixed-point view of `lookAt`.  Built lazily from the f64
+// pair the first time it is needed (see ensureLookAtFix).  Drag handlers
+// update this directly so sub-LSB pan deltas survive at deep zooms.
+var lookAtFix = null;
 var xRange = [0, 0];
 var yRange = [0, 0];
 var escapeRadius = 80.0;
@@ -183,6 +187,10 @@ struct Params {
   orbitTrap: f32,
   orbitRealPoint: f32,
   orbitImgPoint: f32,
+  glitchEps: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -208,26 +216,27 @@ fn iteratePerturbGpu(dcr: f32, dci: f32) -> vec4<f32> {
   var dzi: f32 = 0.0;
   var Tr: f32 = 0.0;
   var Ti: f32 = 0.0;
-  var n: u32 = 0u;
+  var n: u32 = 0u;   // total iterations, used for colouring
+  var k: u32 = 0u;   // index into reference orbit; resets on rebase
   var distance: f32 = 0.0;
-  let cap = P.refOrbitLen - 1u;
-  let maxN = select(cap, P.iterations, P.iterations < cap);
+  let lastK = P.refOrbitLen - 1u;
 
   loop {
-    if (n >= maxN) { break; }
+    if (n >= P.iterations) { break; }
     if ((Tr + Ti) > P.escapeRadius) { break; }
+    if (k >= lastK) { break; }
 
-    let Zr = refOrbit[n].x;
-    let Zi = refOrbit[n].y;
+    let Zr = refOrbit[k].x;
+    let Zi = refOrbit[k].y;
 
-    // delta_z_{n+1} = 2*Z_n*delta_z_n + delta_z_n^2 + delta_c
+    // delta_z_{n+1} = 2*Z_k*delta_z_n + delta_z_n^2 + delta_c
     let new_dzr = 2.0 * (Zr * dzr - Zi * dzi) + (dzr * dzr - dzi * dzi) + dcr;
     let new_dzi = 2.0 * (Zr * dzi + Zi * dzr + dzr * dzi) + dci;
     dzr = new_dzr;
     dzi = new_dzi;
 
-    let Zr1 = refOrbit[n + 1u].x;
-    let Zi1 = refOrbit[n + 1u].y;
+    let Zr1 = refOrbit[k + 1u].x;
+    let Zi1 = refOrbit[k + 1u].y;
     let zr = Zr1 + dzr;
     let zi = Zi1 + dzi;
     Tr = zr * zr;
@@ -264,6 +273,22 @@ fn iteratePerturbGpu(dcr: f32, dci: f32) -> vec4<f32> {
         }
       }
     }
+
+    // Pauldelbrot rebasing: when |z|^2 drops well below |Z_ref|^2 the
+    // delta has lost significance against the reference; adopt the full
+    // position as the new delta and restart from refOrbit[0] (which is 0,
+    // so the perturbation formula reduces to dz' = dz^2 + dc and the same
+    // reference orbit can be reused).  Also rebase if we are about to run
+    // out of reference orbit so the iteration can continue.
+    let refMag2 = Zr1 * Zr1 + Zi1 * Zi1;
+    let nextK = k + 1u;
+    if ((Tr + Ti) < P.glitchEps * refMag2 || nextK >= lastK) {
+      dzr = zr;
+      dzi = zi;
+      k = 0u;
+    } else {
+      k = nextK;
+    }
     n = n + 1u;
   }
 
@@ -299,14 +324,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // any zoom level the f64-encoded lookAt coordinates can express.
 var MANDEL_BIGINT_SCALE_BITS = 256n;
 var MANDEL_BIGINT_SCALE_BITS_NUM = 256;
+var MANDEL_BIGINT_DIV_SCALE = Math.pow(2, -MANDEL_BIGINT_SCALE_BITS_NUM);
 var MANDEL_REF_ORBIT_MAX = 200000;
-var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-4;
+var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-2;
+
+// Pauldelbrot glitch criterion: rebase when |z|^2 drops below
+// mandelGlitchTolerance * |Z_ref|^2.  1e-4 is roughly matched to f32
+// mantissa precision; lower values rebase more aggressively.
+var mandelGlitchTolerance = 1e-4;
 
 var mandelGPUPerturb = null;
 var mandelRefOrbitCache = null;
 
-
 var MANDEL_GPU_PARAMS_BYTES = 64;
+var MANDEL_PERTURB_PARAMS_BYTES = 80;
 var MANDEL_GPU_WORKGROUP_X = 16;
 var MANDEL_GPU_WORKGROUP_Y = 16;
 
@@ -453,14 +484,51 @@ function mandelNumberToFix(x) {
   return negative ? -result : result;
 }
 
+// Inverse of mandelNumberToFix.  BigInt -> Number conversion already takes
+// the top 53 bits, and any Mandelbrot coordinate fits comfortably below f64's
+// exponent range, so this is a single multiply.
+function mandelFixToNumber(fix) {
+  if (fix === 0n) return 0.0;
+  return Number(fix) * MANDEL_BIGINT_DIV_SCALE;
+}
+
+// Hex serialisation of a fix-point BigInt for the URL hash.  Exact and
+// compact (one hex digit per 4 bits, ~64 chars per coord at 256-bit scale).
+function mandelFixToHex(fix) {
+  if (fix < 0n) return '-' + (-fix).toString(16);
+  return fix.toString(16);
+}
+function mandelHexToFix(s) {
+  if (!s) return 0n;
+  var neg = s.charAt(0) === '-';
+  var body = neg ? s.slice(1) : s;
+  if (body.length === 0) return 0n;
+  var v = BigInt('0x' + body);
+  return neg ? -v : v;
+}
+
+// Lazily build the high-precision view of `lookAt` from its f64 mirror.
+function ensureLookAtFix() {
+  if (lookAtFix === null) {
+    lookAtFix = [mandelNumberToFix(lookAt[0]), mandelNumberToFix(lookAt[1])];
+  }
+  return lookAtFix;
+}
+
+// Set both the high-precision and f64 views of the centre coordinate.
+function setLookAtFix(fx, fy) {
+  lookAtFix = [fx, fy];
+  lookAt = [mandelFixToNumber(fx), mandelFixToNumber(fy)];
+}
+
 // Iterate Z_{n+1} = Z_n^2 + C in BigInt fixed point at the reference centre
-// and capture the orbit as f32 pairs for the GPU.  Stops when the orbit
-// escapes or when we reach maxIter (capped at MANDEL_REF_ORBIT_MAX).
-function mandelComputeReferenceOrbit(cx, cy, maxIter, escRadius) {
+// and capture the orbit as f32 pairs for the GPU.  cxBig/cyBig are taken
+// straight in fixed-point so the centre keeps any sub-LSB precision the f64
+// `lookAt` mirror would have lost.  Stops when the orbit escapes or when we
+// reach maxIter (capped at MANDEL_REF_ORBIT_MAX).
+function mandelComputeReferenceOrbit(cxBig, cyBig, maxIter, escRadius) {
   var scaleBits = MANDEL_BIGINT_SCALE_BITS;
-  var divScale = Math.pow(2, -MANDEL_BIGINT_SCALE_BITS_NUM);
-  var cxBig = mandelNumberToFix(cx);
-  var cyBig = mandelNumberToFix(cy);
+  var divScale = MANDEL_BIGINT_DIV_SCALE;
   var escBig = mandelNumberToFix(escRadius);
   var capped = Math.min(maxIter, MANDEL_REF_ORBIT_MAX);
   var orbit = new Float32Array(2 * (capped + 1));
@@ -484,14 +552,16 @@ function mandelComputeReferenceOrbit(cx, cy, maxIter, escRadius) {
   return { orbit: orbit, length: n + 1, escaped: n < capped };
 }
 
-function getReferenceOrbit(cx, cy, steps, esc) {
+// cxBig/cyBig are BigInt fixed-point coordinates; `===` between BigInts is
+// value-based so the cache key works without any extra normalisation.
+function getReferenceOrbit(cxBig, cyBig, steps, esc) {
   var c = mandelRefOrbitCache;
-  if (c && c.cx === cx && c.cy === cy && c.steps === steps && c.esc === esc) {
+  if (c && c.cx === cxBig && c.cy === cyBig && c.steps === steps && c.esc === esc) {
     return c;
   }
-  var res = mandelComputeReferenceOrbit(cx, cy, steps, esc);
+  var res = mandelComputeReferenceOrbit(cxBig, cyBig, steps, esc);
   mandelRefOrbitCache = {
-    cx: cx, cy: cy, steps: steps, esc: esc,
+    cx: cxBig, cy: cyBig, steps: steps, esc: esc,
     orbit: res.orbit, length: res.length, escaped: res.escaped,
   };
   return mandelRefOrbitCache;
@@ -521,7 +591,7 @@ async function initMandelbrotPerturbGPU(resultCount, orbitCount) {
     var outputBytes = resultCount * 4 * 4;
     var orbitBytes = orbitCap * 8;
 
-    var paramsBuf = device.createBuffer({ size: MANDEL_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var paramsBuf = device.createBuffer({ size: MANDEL_PERTURB_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     var orbitBuf = device.createBuffer({ size: orbitBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     var outputBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     var readBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
@@ -547,7 +617,7 @@ async function initMandelbrotPerturbGPU(resultCount, orbitCount) {
       readBuf: readBuf,
       pipeline: pipeline,
       bindGroup: bindGroup,
-      paramsBytes: new ArrayBuffer(MANDEL_GPU_PARAMS_BYTES),
+      paramsBytes: new ArrayBuffer(MANDEL_PERTURB_PARAMS_BYTES),
     };
     return mandelGPUPerturb;
   } catch (e) {
@@ -568,23 +638,36 @@ function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount
   u[5] = orbitType >>> 0;
   u[6] = doOrbitAverage ? 1 : 0;
   u[7] = refLen >>> 0;
-  // dcrStart/dciStart are pixel-(0,0) offsets from the reference centre,
-  // which is lookAt; for a centred view they reduce to -zoom*aspect/2.
-  f[8] = xRange[0] - lookAt[0];
-  f[9] = yRange[0] - lookAt[1];
-  f[10] = dx;
-  f[11] = dy;
+  // The dcrStart/dciStart and per-pixel step values are perturbation
+  // offsets from the reference centre.  Deriving them from xRange/dx
+  // (which round-trip through lookAt +/- zoom/2) suffers catastrophic
+  // cancellation once zoom drops below the f64 LSB of lookAt: the
+  // subtraction collapses to zero or one-ULP noise.  Compute them
+  // straight from zoom instead, where every operation stays in the
+  // representable range of f64.
+  var aspect = width / height;
+  var zoomX = aspect >= 1 ? zoom * aspect : zoom;
+  var zoomY = aspect >= 1 ? zoom : zoom / aspect;
+  f[8] = -zoomX / 2;
+  f[9] = -zoomY / 2;
+  f[10] = zoomX / (0.5 + (width - 1));
+  f[11] = zoomY / (0.5 + (height - 1));
   f[12] = escapeRadius;
   f[13] = orbit_trap;
   f[14] = orbitRealPoint;
   f[15] = orbitImgPoint;
+  f[16] = mandelGlitchTolerance;
+  f[17] = 0.0;
+  f[18] = 0.0;
+  f[19] = 0.0;
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
 async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, steps) {
   var sampleCount = Math.max(1, Math.min(4, parseInt(samples, 10) || 1));
   var resultCount = width * height * sampleCount;
-  var ref = getReferenceOrbit(lookAt[0], lookAt[1], parseInt(steps, 10) || 0, escapeRadius);
+  var fix = ensureLookAtFix();
+  var ref = getReferenceOrbit(fix[0], fix[1], parseInt(steps, 10) || 0, escapeRadius);
   var orbitCount = ref.length;
   if (orbitCount < 2) return null;
 
@@ -751,8 +834,8 @@ function draw(pickColor, superSamples) {
   initialColor = $("colorSlider").value / 100.0;
 
   spectrum = $("spectrumSlider").value;
-  if (spectrum < 900) spectrum = $("spectrumSlider").value / 100.0;
-  else if (spectrum < 950) spectrum = $("spectrumSlider").value / 10.0;
+  if (spectrum < 500) spectrum = $("spectrumSlider").value / 100.0;
+  else if (spectrum < 800) spectrum = $("spectrumSlider").value / 10.0;
 
   if (smoothColor)
     contrast = $("contrastSlider").value / 100.0;
@@ -1147,13 +1230,42 @@ function pickSharpColorBands(steps, n, Tr, Ti, distance) {
  */
 var lastWrittenHash = null;
 
+// Map a canvas pixel to the complex point under it, returned as a fix-point
+// BigInt pair.  The pan delta `zoomX * nx` is computed in f64 (which is fine:
+// |nx|<=0.5 and zoomX is small, so the product is well within f64 precision),
+// converted exactly to fix-point, then added to lookAtFix.  This bypasses
+// both the xRange[1]-xRange[0] cancellation and the f64 LSB on `lookAt`
+// itself, so drag-to-zoom keeps tracking the cursor past zoom ~ 1e-16.
+function pixelToLookAtFix(px, py) {
+  var aspect = canvas.width / canvas.height;
+  var zoomX = aspect >= 1 ? zoom * aspect : zoom;
+  var zoomY = aspect >= 1 ? zoom : zoom / aspect;
+  var nx = px / (canvas.width - 0.5) - 0.5;
+  var ny = py / (canvas.height - 0.5) - 0.5;
+  var fix = ensureLookAtFix();
+  return [fix[0] + mandelNumberToFix(zoomX * nx),
+          fix[1] + mandelNumberToFix(zoomY * ny)];
+}
+
 function updateHashTag(samples, iterations) {
   var scheme = $('colorScheme').value;
 
+  // Number.prototype.toString already produces the shortest decimal that
+  // round-trips through parseFloat at full f64 precision, so zoom and the
+  // f64 `lookAt` restore exactly at any zoom f64 can express.  `lookAtHi`
+  // carries the BigInt fixed-point centre hex-encoded so sub-LSB pan offsets
+  // accumulated by deep-zoom drags survive a refresh too.
+  var fix = ensureLookAtFix();
   var h = 'zoom=' + zoom + '&' +
     'lookAt=' + lookAt + '&' +
+    'lookAtHi=' + mandelFixToHex(fix[0]) + ',' + mandelFixToHex(fix[1]) + '&' +
     'iterations=' + iterations + '&' +
     'superSamples=' + samples + '&' +
+    'escapeRadius=' + $('escapeRadius').value + '&' +
+    'color=' + $('colorSlider').value + '&' +
+    'spectrum=' + $('spectrumSlider').value + '&' +
+    'contrast=' + $('contrastSlider').value + '&' +
+    'smooth=' + ($('smooth').checked ? 1 : 0) + '&' +
     'colorScheme=' + scheme;
   lastWrittenHash = h;
   location.hash = h;
@@ -1178,6 +1290,9 @@ function readHashTag() {
   var redraw = false;
   var hash = location.hash.replace(/^#/, '');
   var tags = hash.split('&');
+  // `lookAtHi` (exact BigInt) wins over the f64 `lookAt` regardless of which
+  // tag appears first in the URL.
+  var lookAtHiSeen = false;
 
   for (var i = 0; i < tags.length; ++i) {
     var tag = tags[i].split('=');
@@ -1191,8 +1306,18 @@ function readHashTag() {
       } break;
 
       case 'lookAt': {
+        if (!lookAtHiSeen) {
+          var l = val.split(',');
+          lookAt = [parseFloat(l[0]), parseFloat(l[1])];
+          lookAtFix = null; // re-derive lazily from the new f64 mirror
+        }
+        redraw = true;
+      } break;
+
+      case 'lookAtHi': {
         var l = val.split(',');
-        lookAt = [parseFloat(l[0]), parseFloat(l[1])];
+        setLookAtFix(mandelHexToFix(l[0]), mandelHexToFix(l[1]));
+        lookAtHiSeen = true;
         redraw = true;
       } break;
 
@@ -1209,6 +1334,31 @@ function readHashTag() {
 
       case 'colorScheme': {
         $('colorScheme').value = String(val);
+        redraw = true;
+      } break;
+
+      case 'escapeRadius': {
+        $('escapeRadius').value = val;
+        redraw = true;
+      } break;
+
+      case 'color': {
+        $('colorSlider').value = String(parseInt(val, 10));
+        redraw = true;
+      } break;
+
+      case 'spectrum': {
+        $('spectrumSlider').value = String(parseInt(val, 10));
+        redraw = true;
+      } break;
+
+      case 'contrast': {
+        $('contrastSlider').value = String(parseInt(val, 10));
+        redraw = true;
+      } break;
+
+      case 'smooth': {
+        $('smooth').checked = (val === '1' || val === 'true');
         redraw = true;
       } break;
     }
@@ -1292,6 +1442,7 @@ function main() {
     setTimeout(function () { location.hash = ''; }, 1);
     zoom = zoomStart;
     lookAt = lookAtDefault;
+    lookAtFix = null;
     reInitCanvas = true;
     draw(getColorPicker(), getSamples());
   };
@@ -1329,19 +1480,8 @@ function main() {
     };
 
     var zoomOut = function (event) {
-      var x = event.clientX;
-      var y = event.clientY;
-
-      var w = window.innerWidth;
-      var h = window.innerHeight;
-
-      var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width - 1));
-      var dy = (yRange[1] - yRange[0]) / (0.5 + (canvas.height - 1));
-
-      x = xRange[0] + x * dx;
-      y = yRange[0] + y * dy;
-
-      lookAt = [x, y];
+      var nf = pixelToLookAtFix(event.clientX, event.clientY);
+      setLookAtFix(nf[0], nf[1]);
 
       if (event.shiftKey) {
         zoom /= 0.5;
@@ -1370,17 +1510,15 @@ function main() {
         var c = ccanvas.getContext('2d');
         c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
-        // Calculate new rectangle to render
-        var x = Math.min(box[0], box[2]) + Math.abs(box[0] - box[2]) / 2.0;
-        var y = Math.min(box[1], box[3]) + Math.abs(box[1] - box[3]) / 2.0;
+        // Calculate new rectangle to render.  Compute the box centre in
+        // complex space directly from `zoom`/`lookAtFix` (see
+        // pixelToLookAtFix) so deep-zoom drags don't lose precision via
+        // xRange cancellation or via the f64 LSB of `lookAt` itself.
+        var bx = Math.min(box[0], box[2]) + Math.abs(box[0] - box[2]) / 2.0;
+        var by = Math.min(box[1], box[3]) + Math.abs(box[1] - box[3]) / 2.0;
 
-        var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width - 1));
-        var dy = (yRange[1] - yRange[0]) / (0.5 + (canvas.height - 1));
-
-        x = xRange[0] + x * dx;
-        y = yRange[0] + y * dy;
-
-        lookAt = [x, y];
+        var nf = pixelToLookAtFix(bx, by);
+        setLookAtFix(nf[0], nf[1]);
 
         var xf = Math.abs(Math.abs(box[0] - box[2]) / canvas.width);
         var yf = Math.abs(Math.abs(box[1] - box[3]) / canvas.height);
@@ -1399,18 +1537,8 @@ function main() {
    */
   if (dragToZoom == false) {
     $('canvasMandelbrot').onclick = function (event) {
-      var x = event.clientX;
-      var y = event.clientY;
-      var w = window.innerWidth;
-      var h = window.innerHeight;
-
-      var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width - 1));
-      var dy = (yRange[1] - yRange[0]) / (0.5 + (canvas.height - 1));
-
-      x = xRange[0] + x * dx;
-      y = yRange[0] + y * dy;
-
-      lookAt = [x, y];
+      var nf = pixelToLookAtFix(event.clientX, event.clientY);
+      setLookAtFix(nf[0], nf[1]);
 
       if (event.shiftKey) {
         zoom /= 0.5;
