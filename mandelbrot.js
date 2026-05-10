@@ -326,7 +326,7 @@ var MANDEL_BIGINT_SCALE_BITS = 256n;
 var MANDEL_BIGINT_SCALE_BITS_NUM = 256;
 var MANDEL_BIGINT_DIV_SCALE = Math.pow(2, -MANDEL_BIGINT_SCALE_BITS_NUM);
 var MANDEL_REF_ORBIT_MAX = 200000;
-var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-2;
+var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-3;
 
 // Pauldelbrot glitch criterion: rebase when |z|^2 drops below
 // mandelGlitchTolerance * |Z_ref|^2.  1e-4 is roughly matched to f32
@@ -729,10 +729,10 @@ function focusOnSubmit() {
 }
 
 function getSamples() {
-  // more than 4x anti-alias samples can overload the GPU
+  // more than 8x anti-alias samples can overload the GPU
   var i = parseInt($('superSamples').value, 10);
   if (i <= 0) i = 1;
-  return Math.min(4, i);
+  return Math.min(8, i);
 }
 
 /*
@@ -833,16 +833,10 @@ function draw(pickColor, superSamples) {
 
   initialColor = $("colorSlider").value / 100.0;
 
-  spectrum = $("spectrumSlider").value;
-  if (spectrum < 500) spectrum = $("spectrumSlider").value / 100.0;
-  else if (spectrum < 800) spectrum = $("spectrumSlider").value / 10.0;
-
   if (smoothColor)
     contrast = $("contrastSlider").value / 100.0;
   else
     contrast = 1.0 - $("contrastSlider").value / 100.0;
-
-  console.log("initialColor: " + initialColor + " spectrum: " + spectrum);
 
   if (reInitCanvas) {
     reInitCanvas = false;
@@ -876,6 +870,14 @@ function draw(pickColor, superSamples) {
     steps = Math.floor(250.0 / f);
     $('steps').value = String(steps);
   }
+
+  // `spectrum` controls how many colour cycles span the iteration range
+  // (hue is roughly n/steps before this multiplier).  Scale by log2(steps)
+  // so banding density stays comparable whether steps is ~50 or ~50000;
+  // the reference 250 keeps the default slider behaving as it used to.
+  var sliderSpectrum = parseFloat($("spectrumSlider").value) || 1;
+  spectrum = (sliderSpectrum / 100.0) * Math.log2(steps) / Math.log2(250);
+  console.log("initialColor: " + initialColor + " spectrum: " + spectrum);
 
   var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width - 1));
   var dy = (yRange[1] - yRange[0]) / (0.5 + (canvas.height - 1));
@@ -1151,7 +1153,16 @@ function getHue(steps, n, Tr, Ti, distance) {
 
   //orbit trap
   if (doOrbit) {
-    var dx = (orbit_trap - distance + 0.03);
+    // The circle trap is a Euclidean distance: its values spread fairly
+    // uniformly across [0, orbit_trap], so `dx` regularly dips to its
+    // 0.03 floor and amplifies hue ~33x.  The product-style traps' values
+    // cluster near 0, so they rarely hit that floor.  Squaring (and
+    // renormalising back into [0, orbit_trap]) skews the circle trap's
+    // distribution toward 0 to match the other traps, without altering
+    // the trap region or the no-hit (distance==0) case.
+    var d = distance;
+    if (orbitType == 3 && orbit_trap > 0) d = (d * d) / orbit_trap;
+    var dx = (orbit_trap - d + 0.03);
     hue = hue / dx;
   }
 
@@ -1266,7 +1277,8 @@ function updateHashTag(samples, iterations) {
     'spectrum=' + $('spectrumSlider').value + '&' +
     'contrast=' + $('contrastSlider').value + '&' +
     'smooth=' + ($('smooth').checked ? 1 : 0) + '&' +
-    'colorScheme=' + scheme;
+    'colorScheme=' + scheme + '&' +
+    'orbitType=' + $('orbitType').value;
   lastWrittenHash = h;
   location.hash = h;
 }
@@ -1360,6 +1372,16 @@ function readHashTag() {
       case 'smooth': {
         $('smooth').checked = (val === '1' || val === 'true');
         redraw = true;
+      } break;
+
+      case 'orbitType': {
+        var ot = parseInt(val, 10);
+        if (isFinite(ot)) {
+          $('orbitType').value = String(ot);
+          doOrbit = (ot >= 0);
+          if (doOrbit) orbitType = ot;
+          redraw = true;
+        }
       } break;
     }
   }
