@@ -38,24 +38,260 @@ var doOrbit = false;
 var orbitType = 3;
 var doOrbitAverage = false;
 
+// WebGPU accelerates the per-pixel Mandelbrot iterations.  Colour mapping
+// stays on the CPU so the existing palette controls and orbit-trap shaping
+// stay in sync with the original renderer.
+var mandelGPU = null;
+var mandelGPUDisabled = false;
+var mandelGPUStatus = 'CPU';
+var mandelGPUInFlight = false;
 
-/*
- * Initialize canvas
- */
+var MANDEL_PIXEL_WGSL = `
+struct Params {
+  width: u32,
+  height: u32,
+  iterations: u32,
+  samples: u32,
+  doOrbit: u32,
+  orbitType: u32,
+  doOrbitAverage: u32,
+  _pad: u32,
+  xStart: f32,
+  yStart: f32,
+  dx: f32,
+  dy: f32,
+  escapeRadius: f32,
+  orbitTrap: f32,
+  orbitRealPoint: f32,
+  orbitImgPoint: f32,
+};
+
+@group(0) @binding(0) var<uniform> P: Params;
+// x=n, y=Tr, z=Ti, w=distance
+@group(0) @binding(1) var<storage, read_write> outPixels: array<vec4<f32>>;
+
+fn hash01(v: u32) -> f32 {
+  var x = v;
+  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+  x = (x >> 16u) ^ x;
+  return f32(x & 0x00ffffffu) / 16777216.0;
+}
+
+fn calcDistGpu(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+  let dx = x1 - x2;
+  let dy = y1 - y2;
+  return sqrt(dx * dx + dy * dy);
+}
+
+fn iterateMandelbrotGpu(Cr: f32, Ci: f32) -> vec4<f32> {
+  var Zr: f32 = 0.0;
+  var Zi: f32 = 0.0;
+  var Tr: f32 = 0.0;
+  var Ti: f32 = 0.0;
+  var n: u32 = 0u;
+  var distance: f32 = 0.0;
+
+  loop {
+    if (n >= P.iterations) { break; }
+    if ((Tr + Ti) > P.escapeRadius) { break; }
+
+    Zi = 2.0 * Zr * Zi + Ci;
+    Zr = Tr - Ti + Cr;
+    Tr = Zr * Zr;
+    Ti = Zi * Zi;
+
+    if (P.doOrbit != 0u) {
+      var dist: f32 = 0.0;
+      switch (P.orbitType) {
+        case 0u: {
+          dist = abs((Zi + P.orbitImgPoint) * (Zr + P.orbitRealPoint));
+        }
+        case 1u: {
+          dist = abs(Zi - P.orbitImgPoint);
+          let dist2 = abs((Zr - P.orbitRealPoint) * (Zi - P.orbitImgPoint));
+          if (dist2 > dist) { dist = dist2; }
+        }
+        case 2u: {
+          dist = abs((Zi - P.orbitImgPoint) * (Zr - P.orbitRealPoint));
+        }
+        case 3u: {
+          dist = calcDistGpu(P.orbitRealPoint, P.orbitImgPoint, Zr, Zi);
+        }
+        default: {
+          dist = atan(abs((Zi - P.orbitImgPoint) / (Zr - P.orbitRealPoint)));
+        }
+      }
+
+      if (dist < P.orbitTrap) {
+        if (P.doOrbitAverage != 0u) {
+          if (distance == 0.0) { distance = dist; }
+          else { distance = dist * 0.25 + distance * 0.75; }
+        } else {
+          if (distance == 0.0 || dist < distance) { distance = dist; }
+        }
+      }
+    }
+    n = n + 1u;
+  }
+
+  return vec4<f32>(f32(n), Tr, Ti, distance);
+}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
+
+  let x = gid.x;
+  let sampleY = gid.y;
+  let y = sampleY / P.samples;
+  let sampleIdx = sampleY - y * P.samples;
+  let pixelIdx = y * P.width + x;
+  let idx = pixelIdx * P.samples + sampleIdx;
+
+  var Cr = P.xStart + f32(x) * P.dx;
+  var Ci = P.yStart + f32(y) * P.dy;
+  if (P.samples > 1u) {
+    let rx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
+    let ry = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
+    Cr = Cr - rx * P.dx * 0.5;
+    Ci = Ci - ry * P.dy * 0.5;
+  }
+
+  outPixels[idx] = iterateMandelbrotGpu(Cr, Ci);
+}
+`;
+
+var MANDEL_GPU_PARAMS_BYTES = 64;
+var MANDEL_GPU_WORKGROUP_X = 16;
+var MANDEL_GPU_WORKGROUP_Y = 16;
+
+function isMandelbrotWebGPUSupported() {
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
+}
+
+function destroyMandelbrotGPU() {
+  if (!mandelGPU) return;
+  var bufs = ['paramsBuf', 'outputBuf', 'readBuf'];
+  for (var i = 0; i < bufs.length; i++) {
+    try { mandelGPU[bufs[i]].destroy(); } catch (e) { }
+  }
+  mandelGPU = null;
+}
+
+async function initMandelbrotGPU(resultCount) {
+  if (mandelGPUDisabled || !isMandelbrotWebGPUSupported()) return null;
+  if (mandelGPU && mandelGPU.resultCapacity >= resultCount) return mandelGPU;
+
+  destroyMandelbrotGPU();
+  try {
+    var adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No WebGPU adapter');
+    var device = await adapter.requestDevice();
+    var outputBytes = resultCount * 4 * 4;
+
+    var paramsBuf = device.createBuffer({ size: MANDEL_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var outputBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var readBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    var module = device.createShaderModule({ code: MANDEL_PIXEL_WGSL });
+    var pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: module, entryPoint: 'main' } });
+    var bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: outputBuf } },
+      ],
+    });
+
+    mandelGPU = {
+      device: device,
+      resultCapacity: resultCount,
+      outputBytes: outputBytes,
+      paramsBuf: paramsBuf,
+      outputBuf: outputBuf,
+      readBuf: readBuf,
+      pipeline: pipeline,
+      bindGroup: bindGroup,
+      paramsBytes: new ArrayBuffer(MANDEL_GPU_PARAMS_BYTES),
+    };
+    mandelGPUStatus = 'GPU';
+    return mandelGPU;
+  } catch (e) {
+    console.warn('Mandelbrot WebGPU path disabled; falling back to CPU.', e);
+    mandelGPUDisabled = true;
+    mandelGPUStatus = 'CPU fallback';
+    destroyMandelbrotGPU();
+    return null;
+  }
+}
+
+function writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps) {
+  var u = new Uint32Array(gpu.paramsBytes);
+  var f = new Float32Array(gpu.paramsBytes);
+  u[0] = width >>> 0;
+  u[1] = height >>> 0;
+  u[2] = (parseInt(steps, 10) || 0) >>> 0;
+  u[3] = sampleCount >>> 0;
+  u[4] = doOrbit ? 1 : 0;
+  u[5] = orbitType >>> 0;
+  u[6] = doOrbitAverage ? 1 : 0;
+  u[7] = 0;
+  f[8] = xRange[0];
+  f[9] = yRange[0];
+  f[10] = dx;
+  f[11] = dy;
+  f[12] = escapeRadius;
+  f[13] = orbit_trap;
+  f[14] = orbitRealPoint;
+  f[15] = orbitImgPoint;
+  gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
+}
+
+async function calcMandelbrotPixelsGPU(width, height, dx, dy, samples, steps) {
+  var sampleCount = Math.max(1, Math.min(4, parseInt(samples, 10) || 1));
+  var resultCount = width * height * sampleCount;
+  var gpu = await initMandelbrotGPU(resultCount);
+  if (!gpu) return null;
+
+  writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps);
+  var outputBytes = resultCount * 4 * 4;
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  var pass = encoder.beginComputePass();
+  pass.setPipeline(gpu.pipeline);
+  pass.setBindGroup(0, gpu.bindGroup);
+  pass.dispatchWorkgroups(
+    Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
+    Math.ceil((height * sampleCount) / MANDEL_GPU_WORKGROUP_Y)
+  );
+  pass.end();
+  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
+
+  var range = gpu.readBuf.getMappedRange(0, outputBytes);
+  return {
+    pixels: new Float32Array(range),
+    samples: sampleCount,
+    release: function () {
+      try { gpu.readBuf.unmap(); } catch (e) { }
+    },
+  };
+}
+
+
+// Initialize canvas
 var canvas = $('canvasMandelbrot');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
-//
 var ccanvas = $('canvasControls');
 ccanvas.width = window.innerWidth;
 ccanvas.height = window.innerHeight;
-//
 var ctx = canvas.getContext('2d');
 var img = ctx.createImageData(canvas.width, 1);
 
-/*
- * Just a shorthand function: Fetch given element, jQuery-style
- */
+// Fetch given element, jQuery-style
 function $(id) {
   return document.getElementById(id);
 }
@@ -66,8 +302,10 @@ function focusOnSubmit() {
 }
 
 function getSamples() {
+  // more than 4x anti-alias samples can overload the GPU
   var i = parseInt($('superSamples').value, 10);
-  return i <= 0 ? 1 : i;
+  if (i <= 0) i = 1;
+  return Math.min(4, i);
 }
 
 /*
@@ -338,7 +576,102 @@ function draw(pickColor, superSamples) {
     scanline();
   }
 
-  render();
+  async function renderGPU() {
+    if (mandelGPUInFlight) return false;
+    mandelGPUInFlight = true;
+
+    var start = (new Date).getTime();
+    var startHeight = canvas.height;
+    var startWidth = canvas.width;
+    var ourRenderId = renderId;
+    var requestedSamples = Math.max(1, Math.min(4, superSamples));
+
+    function renderIsCurrent() {
+      return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
+    }
+
+    function paintGPUBatch(batch) {
+      if (!renderIsCurrent()) return true;
+
+      var gpuImg = ctx.createImageData(canvas.width, canvas.height);
+      var data = gpuImg.data;
+      var pixels = batch.pixels;
+      var sampleCount = batch.samples;
+
+      for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
+        var colorSum = [0, 0, 0, 255];
+
+        for (var s = 0; s < sampleCount; s++) {
+          var poff = (idx * sampleCount + s) * 4;
+          var n = Math.round(pixels[poff]);
+          var Tr = pixels[poff + 1];
+          var Ti = pixels[poff + 2];
+          var dist = pixels[poff + 3];
+
+          if (!isFinite(Tr) || !isFinite(Ti) || !isFinite(dist)) {
+            // GPU overflow can produce NaN/Infinity; treat those samples as interior.
+            colorSum = addRGB(colorSum, interiorColor);
+            continue;
+          }
+
+          colorSum = addRGB(colorSum, pickColor(steps, n, Tr, Ti, dist));
+        }
+
+        var color = divRGB(colorSum, sampleCount);
+        var outOff = idx * 4;
+        data[outOff] = color[0];
+        data[outOff + 1] = color[1];
+        data[outOff + 2] = color[2];
+        data[outOff + 3] = 255;
+      }
+
+      if (!renderIsCurrent()) return true;
+      ctx.putImageData(gpuImg, 0, 0);
+      return true;
+    }
+
+    try {
+      var batch = null;
+      try {
+        batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+      } catch (e) {
+        console.warn('Mandelbrot WebGPU render failed; falling back to CPU.', e);
+        mandelGPUDisabled = true;
+        mandelGPUStatus = 'CPU fallback';
+        destroyMandelbrotGPU();
+        return false;
+      }
+
+      if (!batch) return false;
+      try {
+        if (!paintGPUBatch(batch)) return false;
+      } finally {
+        batch.release();
+      }
+
+      if (!renderIsCurrent()) return true;
+
+      var elapsedMS = Math.max(1, (new Date).getTime() - start);
+      $('renderTime').innerHTML = (elapsedMS / 1000.0).toFixed(1);
+      $('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
+      $('renderSpeedUnit').innerHTML = 'second (GPU)';
+      mandelGPUStatus = 'GPU';
+      return true;
+    } finally {
+      mandelGPUInFlight = false;
+    }
+  }
+
+  if (!mandelGPUDisabled && isMandelbrotWebGPUSupported()) {
+    var fallbackRenderId = renderId;
+    renderGPU().then(function (usedGPU) {
+      if (!usedGPU && renderId == fallbackRenderId) {
+        render();
+      }
+    });
+  } else {
+    render();
+  }
 }
 
 // Some constants used with smoothColor
