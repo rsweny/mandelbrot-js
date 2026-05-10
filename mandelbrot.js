@@ -162,6 +162,150 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+// Perturbation-theory shader: each pixel iterates a small delta from a
+// high-precision reference orbit computed on the CPU with BigInt fixed
+// point.  This sidesteps the f32 precision wall of WGSL at deep zooms.
+var MANDEL_PERTURB_WGSL = `
+struct Params {
+  width: u32,
+  height: u32,
+  iterations: u32,
+  samples: u32,
+  doOrbit: u32,
+  orbitType: u32,
+  doOrbitAverage: u32,
+  refOrbitLen: u32,
+  dcrStart: f32,
+  dciStart: f32,
+  dx: f32,
+  dy: f32,
+  escapeRadius: f32,
+  orbitTrap: f32,
+  orbitRealPoint: f32,
+  orbitImgPoint: f32,
+};
+
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> refOrbit: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> outPixels: array<vec4<f32>>;
+
+fn hash01(v: u32) -> f32 {
+  var x = v;
+  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+  x = (x >> 16u) ^ x;
+  return f32(x & 0x00ffffffu) / 16777216.0;
+}
+
+fn calcDistGpu(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+  let dx = x1 - x2;
+  let dy = y1 - y2;
+  return sqrt(dx * dx + dy * dy);
+}
+
+fn iteratePerturbGpu(dcr: f32, dci: f32) -> vec4<f32> {
+  var dzr: f32 = 0.0;
+  var dzi: f32 = 0.0;
+  var Tr: f32 = 0.0;
+  var Ti: f32 = 0.0;
+  var n: u32 = 0u;
+  var distance: f32 = 0.0;
+  let cap = P.refOrbitLen - 1u;
+  let maxN = select(cap, P.iterations, P.iterations < cap);
+
+  loop {
+    if (n >= maxN) { break; }
+    if ((Tr + Ti) > P.escapeRadius) { break; }
+
+    let Zr = refOrbit[n].x;
+    let Zi = refOrbit[n].y;
+
+    // delta_z_{n+1} = 2*Z_n*delta_z_n + delta_z_n^2 + delta_c
+    let new_dzr = 2.0 * (Zr * dzr - Zi * dzi) + (dzr * dzr - dzi * dzi) + dcr;
+    let new_dzi = 2.0 * (Zr * dzi + Zi * dzr + dzr * dzi) + dci;
+    dzr = new_dzr;
+    dzi = new_dzi;
+
+    let Zr1 = refOrbit[n + 1u].x;
+    let Zi1 = refOrbit[n + 1u].y;
+    let zr = Zr1 + dzr;
+    let zi = Zi1 + dzi;
+    Tr = zr * zr;
+    Ti = zi * zi;
+
+    if (P.doOrbit != 0u) {
+      var dist: f32 = 0.0;
+      switch (P.orbitType) {
+        case 0u: {
+          dist = abs((zi + P.orbitImgPoint) * (zr + P.orbitRealPoint));
+        }
+        case 1u: {
+          dist = abs(zi - P.orbitImgPoint);
+          let dist2 = abs((zr - P.orbitRealPoint) * (zi - P.orbitImgPoint));
+          if (dist2 > dist) { dist = dist2; }
+        }
+        case 2u: {
+          dist = abs((zi - P.orbitImgPoint) * (zr - P.orbitRealPoint));
+        }
+        case 3u: {
+          dist = calcDistGpu(P.orbitRealPoint, P.orbitImgPoint, zr, zi);
+        }
+        default: {
+          dist = atan(abs((zi - P.orbitImgPoint) / (zr - P.orbitRealPoint)));
+        }
+      }
+
+      if (dist < P.orbitTrap) {
+        if (P.doOrbitAverage != 0u) {
+          if (distance == 0.0) { distance = dist; }
+          else { distance = dist * 0.25 + distance * 0.75; }
+        } else {
+          if (distance == 0.0 || dist < distance) { distance = dist; }
+        }
+      }
+    }
+    n = n + 1u;
+  }
+
+  return vec4<f32>(f32(n), Tr, Ti, distance);
+}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
+
+  let x = gid.x;
+  let sampleY = gid.y;
+  let y = sampleY / P.samples;
+  let sampleIdx = sampleY - y * P.samples;
+  let pixelIdx = y * P.width + x;
+  let idx = pixelIdx * P.samples + sampleIdx;
+
+  var dcr = P.dcrStart + f32(x) * P.dx;
+  var dci = P.dciStart + f32(y) * P.dy;
+  if (P.samples > 1u) {
+    let rx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
+    let ry = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
+    dcr = dcr - rx * P.dx * 0.5;
+    dci = dci - ry * P.dy * 0.5;
+  }
+
+  outPixels[idx] = iteratePerturbGpu(dcr, dci);
+}
+`;
+
+// BigInt fixed-point parameters for the reference-orbit computation.
+// 256 fractional bits gives ~76 decimal digits, plenty of headroom for
+// any zoom level the f64-encoded lookAt coordinates can express.
+var MANDEL_BIGINT_SCALE_BITS = 256n;
+var MANDEL_BIGINT_SCALE_BITS_NUM = 256;
+var MANDEL_REF_ORBIT_MAX = 200000;
+var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-4;
+
+var mandelGPUPerturb = null;
+var mandelRefOrbitCache = null;
+
+
 var MANDEL_GPU_PARAMS_BYTES = 64;
 var MANDEL_GPU_WORKGROUP_X = 16;
 var MANDEL_GPU_WORKGROUP_Y = 16;
@@ -279,6 +423,206 @@ async function calcMandelbrotPixelsGPU(width, height, dx, dy, samples, steps) {
     },
   };
 }
+
+// Convert a JS Number to a fixed-point BigInt with MANDEL_BIGINT_SCALE_BITS
+// fractional bits.  Decomposes the IEEE 754 representation directly so the
+// f64 mantissa is preserved without going through Math.round, which would
+// be lossy for values whose magnitude exceeds 2^53.
+function mandelNumberToFix(x) {
+  if (x === 0 || !isFinite(x)) return 0n;
+  var negative = x < 0;
+  var absX = negative ? -x : x;
+  var buf = new ArrayBuffer(8);
+  new Float64Array(buf)[0] = absX;
+  var u = new Uint32Array(buf);
+  var lo = u[0] >>> 0;
+  var hi = u[1] >>> 0;
+  var rawExp = (hi >>> 20) & 0x7FF;
+  var mantissa = (BigInt(hi & 0xFFFFF) << 32n) | BigInt(lo);
+  var exponent;
+  if (rawExp === 0) {
+    exponent = -1022;
+  } else {
+    mantissa |= 1n << 52n;
+    exponent = rawExp - 1023;
+  }
+  var shift = BigInt(exponent - 52) + MANDEL_BIGINT_SCALE_BITS;
+  var result;
+  if (shift >= 0n) result = mantissa << shift;
+  else result = mantissa >> -shift;
+  return negative ? -result : result;
+}
+
+// Iterate Z_{n+1} = Z_n^2 + C in BigInt fixed point at the reference centre
+// and capture the orbit as f32 pairs for the GPU.  Stops when the orbit
+// escapes or when we reach maxIter (capped at MANDEL_REF_ORBIT_MAX).
+function mandelComputeReferenceOrbit(cx, cy, maxIter, escRadius) {
+  var scaleBits = MANDEL_BIGINT_SCALE_BITS;
+  var divScale = Math.pow(2, -MANDEL_BIGINT_SCALE_BITS_NUM);
+  var cxBig = mandelNumberToFix(cx);
+  var cyBig = mandelNumberToFix(cy);
+  var escBig = mandelNumberToFix(escRadius);
+  var capped = Math.min(maxIter, MANDEL_REF_ORBIT_MAX);
+  var orbit = new Float32Array(2 * (capped + 1));
+  var Zx = 0n;
+  var Zy = 0n;
+  orbit[0] = 0;
+  orbit[1] = 0;
+  var n = 0;
+  for (var i = 1; i <= capped; i++) {
+    var Zx2 = (Zx * Zx) >> scaleBits;
+    var Zy2 = (Zy * Zy) >> scaleBits;
+    var newZx = Zx2 - Zy2 + cxBig;
+    var newZy = ((Zx * Zy) >> (scaleBits - 1n)) + cyBig;
+    Zx = newZx;
+    Zy = newZy;
+    orbit[2 * i] = Number(Zx) * divScale;
+    orbit[2 * i + 1] = Number(Zy) * divScale;
+    n = i;
+    if (Zx2 + Zy2 > escBig) break;
+  }
+  return { orbit: orbit, length: n + 1, escaped: n < capped };
+}
+
+function getReferenceOrbit(cx, cy, steps, esc) {
+  var c = mandelRefOrbitCache;
+  if (c && c.cx === cx && c.cy === cy && c.steps === steps && c.esc === esc) {
+    return c;
+  }
+  var res = mandelComputeReferenceOrbit(cx, cy, steps, esc);
+  mandelRefOrbitCache = {
+    cx: cx, cy: cy, steps: steps, esc: esc,
+    orbit: res.orbit, length: res.length, escaped: res.escaped,
+  };
+  return mandelRefOrbitCache;
+}
+
+function destroyMandelbrotPerturbGPU() {
+  if (!mandelGPUPerturb) return;
+  var bufs = ['paramsBuf', 'orbitBuf', 'outputBuf', 'readBuf'];
+  for (var i = 0; i < bufs.length; i++) {
+    try { mandelGPUPerturb[bufs[i]].destroy(); } catch (e) { }
+  }
+  mandelGPUPerturb = null;
+}
+
+async function initMandelbrotPerturbGPU(resultCount, orbitCount) {
+  if (mandelGPUDisabled || !isMandelbrotWebGPUSupported()) return null;
+  if (mandelGPUPerturb &&
+      mandelGPUPerturb.resultCapacity >= resultCount &&
+      mandelGPUPerturb.orbitCapacity >= orbitCount) return mandelGPUPerturb;
+
+  destroyMandelbrotPerturbGPU();
+  try {
+    var adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No WebGPU adapter');
+    var device = await adapter.requestDevice();
+    var orbitCap = Math.max(1024, orbitCount);
+    var outputBytes = resultCount * 4 * 4;
+    var orbitBytes = orbitCap * 8;
+
+    var paramsBuf = device.createBuffer({ size: MANDEL_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var orbitBuf = device.createBuffer({ size: orbitBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    var outputBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var readBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    var module = device.createShaderModule({ code: MANDEL_PERTURB_WGSL });
+    var pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: module, entryPoint: 'main' } });
+    var bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: orbitBuf } },
+        { binding: 2, resource: { buffer: outputBuf } },
+      ],
+    });
+
+    mandelGPUPerturb = {
+      device: device,
+      resultCapacity: resultCount,
+      orbitCapacity: orbitCap,
+      outputBytes: outputBytes,
+      paramsBuf: paramsBuf,
+      orbitBuf: orbitBuf,
+      outputBuf: outputBuf,
+      readBuf: readBuf,
+      pipeline: pipeline,
+      bindGroup: bindGroup,
+      paramsBytes: new ArrayBuffer(MANDEL_GPU_PARAMS_BYTES),
+    };
+    return mandelGPUPerturb;
+  } catch (e) {
+    console.warn('Mandelbrot WebGPU perturbation path failed; falling back.', e);
+    destroyMandelbrotPerturbGPU();
+    return null;
+  }
+}
+
+function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount, steps, refLen) {
+  var u = new Uint32Array(gpu.paramsBytes);
+  var f = new Float32Array(gpu.paramsBytes);
+  u[0] = width >>> 0;
+  u[1] = height >>> 0;
+  u[2] = (parseInt(steps, 10) || 0) >>> 0;
+  u[3] = sampleCount >>> 0;
+  u[4] = doOrbit ? 1 : 0;
+  u[5] = orbitType >>> 0;
+  u[6] = doOrbitAverage ? 1 : 0;
+  u[7] = refLen >>> 0;
+  // dcrStart/dciStart are pixel-(0,0) offsets from the reference centre,
+  // which is lookAt; for a centred view they reduce to -zoom*aspect/2.
+  f[8] = xRange[0] - lookAt[0];
+  f[9] = yRange[0] - lookAt[1];
+  f[10] = dx;
+  f[11] = dy;
+  f[12] = escapeRadius;
+  f[13] = orbit_trap;
+  f[14] = orbitRealPoint;
+  f[15] = orbitImgPoint;
+  gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
+}
+
+async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, steps) {
+  var sampleCount = Math.max(1, Math.min(4, parseInt(samples, 10) || 1));
+  var resultCount = width * height * sampleCount;
+  var ref = getReferenceOrbit(lookAt[0], lookAt[1], parseInt(steps, 10) || 0, escapeRadius);
+  var orbitCount = ref.length;
+  if (orbitCount < 2) return null;
+
+  var gpu = await initMandelbrotPerturbGPU(resultCount, orbitCount);
+  if (!gpu) return null;
+
+  gpu.device.queue.writeBuffer(gpu.orbitBuf, 0, ref.orbit.buffer, ref.orbit.byteOffset, orbitCount * 8);
+  writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount, steps, orbitCount);
+
+  var outputBytes = resultCount * 4 * 4;
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  var pass = encoder.beginComputePass();
+  pass.setPipeline(gpu.pipeline);
+  pass.setBindGroup(0, gpu.bindGroup);
+  pass.dispatchWorkgroups(
+    Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
+    Math.ceil((height * sampleCount) / MANDEL_GPU_WORKGROUP_Y)
+  );
+  pass.end();
+  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
+
+  var range = gpu.readBuf.getMappedRange(0, outputBytes);
+  return {
+    pixels: new Float32Array(range),
+    samples: sampleCount,
+    refEscaped: ref.escaped,
+    refLength: ref.length,
+    release: function () {
+      try { gpu.readBuf.unmap(); } catch (e) { }
+    },
+  };
+}
+
+
 
 
 // Initialize canvas
@@ -632,13 +976,21 @@ function draw(pickColor, superSamples) {
 
     try {
       var batch = null;
+      var usePerturb = zoom < MANDEL_PERTURB_ZOOM_THRESHOLD;
       try {
-        batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+        if (usePerturb) {
+          batch = await calcMandelbrotPerturbPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+        }
+        if (!batch) {
+          batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+          usePerturb = false;
+        }
       } catch (e) {
         console.warn('Mandelbrot WebGPU render failed; falling back to CPU.', e);
         mandelGPUDisabled = true;
         mandelGPUStatus = 'CPU fallback';
         destroyMandelbrotGPU();
+        destroyMandelbrotPerturbGPU();
         return false;
       }
 
@@ -652,10 +1004,10 @@ function draw(pickColor, superSamples) {
       if (!renderIsCurrent()) return true;
 
       var elapsedMS = Math.max(1, (new Date).getTime() - start);
+      mandelGPUStatus = usePerturb ? 'GPU perturb' : 'GPU';
       $('renderTime').innerHTML = (elapsedMS / 1000.0).toFixed(1);
       $('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
-      $('renderSpeedUnit').innerHTML = 'second (GPU)';
-      mandelGPUStatus = 'GPU';
+      $('renderSpeedUnit').innerHTML = 'second (' + mandelGPUStatus + ')';
       return true;
     } finally {
       mandelGPUInFlight = false;
