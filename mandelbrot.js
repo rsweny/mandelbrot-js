@@ -35,12 +35,13 @@ var dragToZoom = true;
 var colors = [[0, 0, 0, 0]];
 var renderId = 0; // To zoom before current render is finished
 
-var orbit_trap = 0.5;
-var orbitRealPoint = 0.5;
-var orbitImgPoint = -0.25;
-var doOrbit = false;
-var orbitType = 3;
-var doOrbitAverage = false;
+let doOrbit = false;
+let orbitType = 3;
+const orbit_trap = 0.5;
+const orbitRealPoint = 0.5;
+const orbitImgPoint = -0.25;
+const doOrbitAverage = false;
+let colourSeed = 1 + Math.random() * 0.5;
 
 // WebGPU accelerates the per-pixel Mandelbrot iterations.  Colour mapping
 // stays on the CPU so the existing palette controls and orbit-trap shaping
@@ -325,13 +326,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 var MANDEL_BIGINT_SCALE_BITS = 256n;
 var MANDEL_BIGINT_SCALE_BITS_NUM = 256;
 var MANDEL_BIGINT_DIV_SCALE = Math.pow(2, -MANDEL_BIGINT_SCALE_BITS_NUM);
-var MANDEL_REF_ORBIT_MAX = 200000;
 var MANDEL_PERTURB_ZOOM_THRESHOLD = 1e-3;
 
 // Pauldelbrot glitch criterion: rebase when |z|^2 drops below
-// mandelGlitchTolerance * |Z_ref|^2.  1e-4 is roughly matched to f32
+// mandelGlitchTolerance * |Z_ref|^2.  1e-3 is roughly matched to f32
 // mantissa precision; lower values rebase more aggressively.
-var mandelGlitchTolerance = 1e-4;
+var mandelGlitchTolerance = 1e-3;
 
 var mandelGPUPerturb = null;
 var mandelRefOrbitCache = null;
@@ -525,19 +525,18 @@ function setLookAtFix(fx, fy) {
 // and capture the orbit as f32 pairs for the GPU.  cxBig/cyBig are taken
 // straight in fixed-point so the centre keeps any sub-LSB precision the f64
 // `lookAt` mirror would have lost.  Stops when the orbit escapes or when we
-// reach maxIter (capped at MANDEL_REF_ORBIT_MAX).
+// reach maxIter
 function mandelComputeReferenceOrbit(cxBig, cyBig, maxIter, escRadius) {
   var scaleBits = MANDEL_BIGINT_SCALE_BITS;
   var divScale = MANDEL_BIGINT_DIV_SCALE;
   var escBig = mandelNumberToFix(escRadius);
-  var capped = Math.min(maxIter, MANDEL_REF_ORBIT_MAX);
-  var orbit = new Float32Array(2 * (capped + 1));
+  var orbit = new Float32Array(2 * (maxIter + 1));
   var Zx = 0n;
   var Zy = 0n;
   orbit[0] = 0;
   orbit[1] = 0;
   var n = 0;
-  for (var i = 1; i <= capped; i++) {
+  for (var i = 1; i <= maxIter; i++) {
     var Zx2 = (Zx * Zx) >> scaleBits;
     var Zy2 = (Zy * Zy) >> scaleBits;
     var newZx = Zx2 - Zy2 + cxBig;
@@ -549,7 +548,7 @@ function mandelComputeReferenceOrbit(cxBig, cyBig, maxIter, escRadius) {
     n = i;
     if (Zx2 + Zy2 > escBig) break;
   }
-  return { orbit: orbit, length: n + 1, escaped: n < capped };
+  return { orbit: orbit, length: n + 1, escaped: n < maxIter };
 }
 
 // cxBig/cyBig are BigInt fixed-point coordinates; `===` between BigInts is
@@ -664,10 +663,9 @@ function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount
 }
 
 async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, steps) {
-  var sampleCount = Math.max(1, Math.min(4, parseInt(samples, 10) || 1));
-  var resultCount = width * height * sampleCount;
+  var resultCount = width * height * samples;
   var fix = ensureLookAtFix();
-  var ref = getReferenceOrbit(fix[0], fix[1], parseInt(steps, 10) || 0, escapeRadius);
+  var ref = getReferenceOrbit(fix[0], fix[1], steps ?? 20, escapeRadius);
   var orbitCount = ref.length;
   if (orbitCount < 2) return null;
 
@@ -675,7 +673,7 @@ async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, st
   if (!gpu) return null;
 
   gpu.device.queue.writeBuffer(gpu.orbitBuf, 0, ref.orbit.buffer, ref.orbit.byteOffset, orbitCount * 8);
-  writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount, steps, orbitCount);
+  writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, samples, steps, orbitCount);
 
   var outputBytes = resultCount * 4 * 4;
   var d = gpu.device;
@@ -685,7 +683,7 @@ async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, st
   pass.setBindGroup(0, gpu.bindGroup);
   pass.dispatchWorkgroups(
     Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
-    Math.ceil((height * sampleCount) / MANDEL_GPU_WORKGROUP_Y)
+    Math.ceil((height * samples) / MANDEL_GPU_WORKGROUP_Y)
   );
   pass.end();
   encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
@@ -696,7 +694,7 @@ async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, st
   var range = gpu.readBuf.getMappedRange(0, outputBytes);
   return {
     pixels: new Float32Array(range),
-    samples: sampleCount,
+    samples: samples,
     refEscaped: ref.escaped,
     refLength: ref.length,
     release: function () {
@@ -834,9 +832,9 @@ function draw(pickColor, superSamples) {
   initialColor = $("colorSlider").value / 100.0;
 
   if (smoothColor)
-    contrast = $("contrastSlider").value / 100.0;
+    contrast = $("contrastSlider").value / 200.0;
   else
-    contrast = 1.0 - $("contrastSlider").value / 100.0;
+    contrast = 1.0 - $("contrastSlider").value / 200.0;
 
   if (reInitCanvas) {
     reInitCanvas = false;
@@ -859,8 +857,7 @@ function draw(pickColor, superSamples) {
   xRange = [lookAt[0] - zoomX / 2, lookAt[0] + zoomX / 2];
   yRange = [lookAt[1] - zoomY / 2, lookAt[1] + zoomY / 2];
 
-  var steps = parseInt($('steps').value, 10);
-
+  var steps = Math.min(100000, parseInt($('steps').value));
   if ($('autoIterations').checked) {
     var f = Math.sqrt(
       0.001 + 4.0 * Math.min(
@@ -873,10 +870,10 @@ function draw(pickColor, superSamples) {
 
   // `spectrum` controls how many colour cycles span the iteration range
   // (hue is roughly n/steps before this multiplier).  Scale by log2(steps)
-  // so banding density stays comparable whether steps is ~50 or ~50000;
-  // the reference 250 keeps the default slider behaving as it used to.
-  var sliderSpectrum = parseFloat($("spectrumSlider").value) || 1;
-  spectrum = (sliderSpectrum / 100.0) * Math.log2(steps) / Math.log2(250);
+  // so banding density stays comparable whether steps is ~50 or ~50000
+  const sliderSpectrum = parseFloat($("spectrumSlider").value) || 1;
+  const factor = $("colorScheme").value == "pickGradientColorBands" && spectrum > 11 ? 1 : 100;
+  spectrum = (sliderSpectrum/factor) * Math.log2(Math.min(steps,10000)) / Math.log2(250);
   console.log("initialColor: " + initialColor + " spectrum: " + spectrum);
 
   var dx = (xRange[1] - xRange[0]) / (0.5 + (canvas.width - 1));
@@ -1013,7 +1010,6 @@ function draw(pickColor, superSamples) {
     var startHeight = canvas.height;
     var startWidth = canvas.width;
     var ourRenderId = renderId;
-    var requestedSamples = Math.max(1, Math.min(4, superSamples));
 
     function renderIsCurrent() {
       return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
@@ -1064,10 +1060,10 @@ function draw(pickColor, superSamples) {
       var usePerturb = zoom < MANDEL_PERTURB_ZOOM_THRESHOLD;
       try {
         if (usePerturb) {
-          batch = await calcMandelbrotPerturbPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+          batch = await calcMandelbrotPerturbPixelsGPU(canvas.width, canvas.height, dx, dy, superSamples, steps);
         }
         if (!batch) {
-          batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, requestedSamples, steps);
+          batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, superSamples, steps);
           usePerturb = false;
         }
       } catch (e) {
@@ -1166,11 +1162,6 @@ function getHue(steps, n, Tr, Ti, distance) {
     hue = hue / dx;
   }
 
-  //scale the color gradients logarithmically for deep zooms
-  if (steps > 10000) {
-    hue = (hue + 1) * 10;
-    hue = Math.log(1.0 + Math.log(hue));
-  }
   return hue;
 }
 
@@ -1180,12 +1171,11 @@ function pickGradientColorBands(steps, n, Tr, Ti, distance) {
 
   var hue = getHue(steps, n, Tr, Ti, distance);
   var huesat = hue;
-  hue = hue * 1600000 * spectrum;
-  hue = (hue % 1600000) / 1600000.0;
+  hue = hue * 16000 * spectrum;
+  hue = (hue % 16000) / 16000;
 
-
-  huesat = huesat * 160000 * band;
-  huesat = (huesat % 160000) / 160000.0;
+  huesat = huesat * 16000 * band * colourSeed;
+  huesat = (huesat % 16000) / 16000;
   var new_sat = 1.0 - huesat;
 
   if (smoothColor) {
@@ -1193,35 +1183,43 @@ function pickGradientColorBands(steps, n, Tr, Ti, distance) {
     huesat *= 2.0;
   }
 
-  var new_gamma = Math.min(Math.pow(huesat, contrast), 1.0);
-  if (smoothColor) {
-    if (new_gamma > 0.5) new_gamma = 1.0 - new_gamma;
-    new_gamma *= 2.0;
+  let gama_hue = huesat;
+  if (steps > 10000) {
+    gama_hue = gama_hue * 16000 * colourSeed * 2;
+    gama_hue = (gama_hue % 16000) / 16000;
   }
 
-  var c = HSVtoRGB(hue + initialColor, new_sat, new_gamma);
+  var gamma = Math.min(Math.pow(gama_hue, contrast), 1.0);
+  if (smoothColor) {
+    if (gamma > 0.5) gamma = 1.0 - gamma;
+    gamma *= 2.0;
+  }
+  gamma = Math.min(1.0, gamma+0.1);
+
+  var c = HSVtoRGB(hue + initialColor, new_sat, gamma);
   c.push(255); // alpha
   return c;
 }
 
-
 function pickSharpColorBands(steps, n, Tr, Ti, distance) {
-  if (n == steps) // converged?
-    return interiorColor;
+  if (n == steps) return interiorColor;
 
-  var hue = getHue(steps, n, Tr, Ti, distance);
-  hue = hue * 1600000 * spectrum;
-  hue = (hue % 1600000) / 1600000.0;
+  let hue = getHue(steps, n, Tr, Ti, distance);
+  hue = hue * 16000 * spectrum;
+  hue = (hue % 16000) / 16000;
 
-  var hue2 = hue;
-  var new_gamma = Math.min(glow * Math.pow(hue2, contrast), 1.0);
+  let hue2 = hue * 16000 * spectrum * colourSeed;
+  hue2 = (hue2 % 16000) / 16000;
 
+
+  let gamma = Math.min(glow * Math.pow(hue2, contrast), 0.99);
   if (smoothColor) {
-    if (new_gamma > 0.5) new_gamma = 1.0 - new_gamma;
-    new_gamma *= 2;
+    if (gamma > 0.5) gamma = 1 - gamma;
+    gamma *= 2;
+    gamma = Math.min(1.0, gamma+0.1);
   }
-
-  new_sat = (spectrum < 1.3 && ((spectrum * 10)) % 2 == 0) ? new_gamma : 1.0 - new_gamma;
+  
+  new_sat = 1.0 - gamma;
   new_sat = Math.pow(new_sat / band, 0.75);
   if (new_sat > 1.0) new_sat = 1.0;
 
@@ -1230,8 +1228,7 @@ function pickSharpColorBands(steps, n, Tr, Ti, distance) {
     new_sat *= 2.0;
   }
 
-  var c = HSVtoRGB(hue + initialColor, new_sat, new_gamma);
-
+  const c = HSVtoRGB(hue + initialColor, new_sat, gamma);
   c.push(255); // alpha
   return c;
 }
@@ -1426,7 +1423,7 @@ function main() {
     link.click();
   };
 
-  $('steps').onkeyup = function (event) {
+  $('steps').onblur = function (event) {
     // disable auto-iterations when user edits it manually
     $('autoIterations').checked = false;
     draw(getColorPicker(), getSamples());
@@ -1456,6 +1453,7 @@ function main() {
   };
 
   $("smooth").onchange = function () {
+    if (steps > 100) colourSeed = 1 + Math.random() * 3.5;
     draw(getColorPicker(), getSamples());
   };
 
