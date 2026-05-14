@@ -94,7 +94,7 @@ var xcen         = 0.0;
 var ycen         = 0.01;
 var depth        = 20;
 var glow         = 0.015;
-var brightness   = 1.2;
+var brightness   = 1.28;
 var complexScale = 0;
 var cx = 0, cy = 0;
 var scalePoint    = false;
@@ -329,8 +329,7 @@ function computePixel(xi, yi) {
 
     var value = zSum.cot();
 
-    if (isFinite(value.re) && isFinite(value.im) &&
-        !isNaN(value.re)   && !isNaN(value.im)) {
+    if (isFinite(value.re) && isFinite(value.im) && !isNaN(value.re)   && !isNaN(value.im)) {
 
       var x = Complex.pow(value, 0.1).abs();
       var y = Complex.pow(value, 0.5).abs();
@@ -358,7 +357,7 @@ function computePixel(xi, yi) {
     }
   }
 
-  const brightness_factor = Math.pow(depth, 2.01 - brightness);
+  const brightness_factor = Math.pow(depth, 2.1 - brightness);
   let red = 0, green = 0, blue = 0;
   if (brightness_factor > 0) {
     if (xmax > 0) red   = (xtot * 255 / brightness_factor) / xmax;
@@ -483,6 +482,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> outPixels: array<vec4<f32>>;
 
 const MATH_E: f32 = 2.718281828459045;
+const ONE = vec2<f32>(1.0, 0.0);
 
 fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x);
@@ -501,12 +501,19 @@ fn csinh(v: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(sinh(v.x)*cos(v.y), cosh(v.x)*sin(v.y));
 }
 fn ccot(v: vec2<f32>) -> vec2<f32> {
+
+  // Guard against f32 sinh/cosh overflow (happens at |y| > ~88, much sooner
+  // than the f64 CPU path at ~710).  For large |Im(v)|, cot(x+iy) → -i·sign(y),
+  //  if (abs(v.y) > 80) {
+  //    return vec2<f32>(0.0, select(-1.0, 1.0, v.y > 0.0));
+  //  }
+
   let sinZ = vec2<f32>(sin(v.x)*cosh(v.y),  cos(v.x)*sinh(v.y));
   let cosZ = vec2<f32>(cos(v.x)*cosh(v.y), -sin(v.x)*sinh(v.y));
   return cdiv(cosZ, sinZ);
 }
 fn cpow_real(z: vec2<f32>, n: f32) -> vec2<f32> {
-  if (n == 0.0) { return vec2<f32>(1.0, 0.0); }
+  if (n == 0.0) { return ONE; }
   let r = length(z);
   if (r == 0.0) { return vec2<f32>(0.0, 0.0); }
   let rn = pow(r, n);
@@ -514,12 +521,11 @@ fn cpow_real(z: vec2<f32>, n: f32) -> vec2<f32> {
   return vec2<f32>(rn*cos(theta), rn*sin(theta));
 }
 fn isFiniteVec(v: vec2<f32>) -> bool {
-  return all(abs(v) < vec2<f32>(1e30, 1e30));
+  return all(abs(v) < vec2<f32>(1e20, 1e20));
 }
 fn zfunc(z: vec2<f32>) -> vec2<f32> {
-  let one = vec2<f32>(1.0, 0.0);
   if (P.alg == 0u) { return cpow_real(z, MATH_E); }
-  if (P.alg == 1u) { return clog(cdiv(one + z, one - z)); }
+  if (P.alg == 1u) { return clog(cdiv(ONE + z, ONE - z)); }
   return csinh(z);
 }
 
@@ -597,7 +603,7 @@ var TAYLOR_GPU_WORKGROUP_X  = 16;
 var TAYLOR_GPU_WORKGROUP_Y  = 16;
 
 var taylorGPU         = null;
-var taylorGPUDisabled = false;
+let taylorGPUDisabled = false;
 
 // ---------------------------------------------------------------------------
 // Public draw / reset
@@ -752,7 +758,7 @@ function resetAndDraw() {
   ycen         = 0.01;
   depth        = 20;
   glow         = 0.01;
-  brightness   = 1.0;
+  brightness   = 1.28;
   complexScale = 0;
   cx = 0; cy = 0;
   scalePoint    = false;
@@ -853,8 +859,10 @@ function main() {
   initCanvas();
   setupMouse();
 
-  $('drawButton').onclick  = draw;
-  $('resetButton').onclick = resetAndDraw;
+  // CPU rendering sometimes contains more detail and less rendering artifacts than GPU
+  // likely due to float 32 limits
+  $('drawButton').onclick = () => { taylorGPUDisabled = true; draw(); };
+  $('resetButton').onclick = () => { taylorGPUDisabled = false; resetAndDraw(); };
 
   // Re-render automatically when any control changes
   var textIds     = ['depth', 'zoom', 'xcen', 'ycen', 'complexScale'];
