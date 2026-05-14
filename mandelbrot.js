@@ -1,22 +1,7 @@
 /*
- * The Mandelbrot Set, in HTML5 canvas and javascript.
- * https://github.com/rsweny/mandelbrot-js
- *
- * Copyright (C) 2012 Christian Stigen Larsen
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.  You may obtain
- * a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- */
+* The Mandelbrot Set, in HTML5 canvas, javascript and WebGPU.
+* https://github.com/rsweny/mandelbrot-js
+*/
 
 var zoomStart = 3.4;
 var zoom = zoomStart;
@@ -180,8 +165,13 @@ struct Params {
   orbitType: u32,
   doOrbitAverage: u32,
   refOrbitLen: u32,
+
+  // The smallest normal f32 is ~1.175e-38. At zoom ≈ 1e-36 with a ~1000-pixel-wide canvas, the per-pixel step dx = zoomX / width ≈ 1e-39 falls into f32
+  // denormal territory and the WGSL f32(x) * P.dx collapses. dcr becomes the same value for every pixel in the row,
+  // the perturbation iteration reduces to "the reference orbit" everywhere
   dcrStart: f32,
   dciStart: f32,
+
   dx: f32,
   dy: f32,
   escapeRadius: f32,
@@ -637,6 +627,7 @@ function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount
   u[5] = orbitType >>> 0;
   u[6] = doOrbitAverage ? 1 : 0;
   u[7] = refLen >>> 0;
+
   // The dcrStart/dciStart and per-pixel step values are perturbation
   // offsets from the reference centre.  Deriving them from xRange/dx
   // (which round-trip through lookAt +/- zoom/2) suffers catastrophic
@@ -702,9 +693,6 @@ async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, st
     },
   };
 }
-
-
-
 
 // Initialize canvas
 var canvas = $('canvasMandelbrot');
@@ -881,7 +869,6 @@ function draw(pickColor, superSamples) {
   var Ci_step = (yRange[1] - yRange[0]) / (0.5 + (canvas.height - 1));
 
   updateHashTag(superSamples, steps);
-  updateInfoBox();
 
   // Only enable one render at a time
   renderId += 1;
@@ -958,18 +945,6 @@ function draw(pickColor, superSamples) {
       ctx.putImageData(img, 0, sy);
 
       var now = (new Date).getTime();
-
-      /*
-       * Javascript is inherently single-threaded, and the way
-       * you yield thread control back to the browser is MYSTERIOUS.
-       *
-       * People seem to use setTimeout() to yield, which lets us
-       * make sure the canvas is updated, so that we can do animations.
-       *
-       * But if we do that for every scanline, it will take 100x longer
-       * to render everything, because of overhead.  So therefore, we'll
-       * do something in between.
-       */
       if (sy++ < canvas.height) {
         if ((now - lastUpdate) >= updateTimeout) {
           // show the user where we're rendering
@@ -1088,7 +1063,7 @@ function draw(pickColor, superSamples) {
       mandelGPUStatus = usePerturb ? 'GPU perturb' : 'GPU';
       $('renderTime').innerHTML = (elapsedMS / 1000.0).toFixed(1);
       $('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
-      $('renderSpeedUnit').innerHTML = 'second (' + mandelGPUStatus + ')';
+      $('renderSpeedUnit').innerHTML = 'sec (' + mandelGPUStatus + ')';
       return true;
     } finally {
       mandelGPUInFlight = false;
@@ -1281,18 +1256,6 @@ function updateHashTag(samples, iterations) {
 }
 
 /*
- * Update small info box in lower right hand side
- */
-function updateInfoBox() {
-  // Update infobox
-  $('infoBox').innerHTML =
-    'x<sub>0</sub>=' + xRange[0] + ' y<sub>0</sub>=' + yRange[0] + ' ' +
-    'x<sub>1</sub>=' + xRange[1] + ' y<sub>1</sub>=' + yRange[1] + ' ' +
-    'wxh=' + canvas.width + 'x' + canvas.height + ' '
-    + (canvas.width * canvas.height / 1000000.0).toFixed(1) + 'MP';
-}
-
-/*
  * Parse URL hash tag, returns whether we should redraw.
  */
 function readHashTag() {
@@ -1397,7 +1360,6 @@ function metric_units(number) {
   var mag = Math.ceil((1 + Math.log(number) / Math.log(10)) / 3);
   return "" + (number / Math.pow(10, 3 * (mag - 1))).toFixed(2) + unit[mag];
 }
-
 
 function addRGB(v, w) {
   v[0] += w[0];
@@ -1531,8 +1493,7 @@ function main() {
         c.clearRect(0, 0, ccanvas.width, ccanvas.height);
 
         // Calculate new rectangle to render.  Compute the box centre in
-        // complex space directly from `zoom`/`lookAtFix` (see
-        // pixelToLookAtFix) so deep-zoom drags don't lose precision via
+        // complex space directly from `zoom`/`lookAtFix` (see pixelToLookAtFix) so deep-zoom drags don't lose precision via
         // xRange cancellation or via the f64 LSB of `lookAt` itself.
         var bx = Math.min(box[0], box[2]) + Math.abs(box[0] - box[2]) / 2.0;
         var by = Math.min(box[1], box[3]) + Math.abs(box[1] - box[3]) / 2.0;
@@ -1551,10 +1512,6 @@ function main() {
     };
   }
 
-  /*
-   * Enable zooming (currently, the zooming is inexact!) Click to zoom;
-   * perfect to mobile phones, etc.
-   */
   if (dragToZoom == false) {
     $('canvasMandelbrot').onclick = function (event) {
       var nf = pixelToLookAtFix(event.clientX, event.clientY);

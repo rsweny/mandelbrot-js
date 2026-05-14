@@ -145,6 +145,60 @@ function updateStatus(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// URL hash — persist fractal parameters so views can be bookmarked / shared.
+// ---------------------------------------------------------------------------
+
+var lastWrittenHash = null;
+
+function updateHashTag() {
+  var h = 'zoom='          + zoom +
+          '&xcen='         + xcen +
+          '&ycen='         + ycen +
+          '&depth='        + depth +
+          '&glow='         + Math.round(glow * 1000) +
+          '&brightness='   + Math.round(brightness * 100) +
+          '&complexScale=' + complexScale +
+          '&alg='          + alg +
+          '&scalePoint='   + (scalePoint    ? '1' : '0') +
+          '&compoundPoint='+ (compoundPoint ? '1' : '0') +
+          '&recurse='      + (recurse       ? '1' : '0') +
+          '&mandelbrot='   + (mandelbrot    ? '1' : '0') +
+          '&cx='           + cx +
+          '&cy='           + cy;
+  lastWrittenHash = h;
+  location.hash = h;
+}
+
+function readHashTag() {
+  var tags = location.hash.replace(/^#/, '').split('&');
+  var redraw = false;
+  for (var i = 0; i < tags.length; i++) {
+    var kv  = tags[i].split('=');
+    var key = kv[0];
+    var val = decodeURIComponent(kv[1] !== undefined ? kv[1] : '');
+    var fv  = parseFloat(val);
+    var iv  = parseInt(val, 10);
+    switch (key) {
+      case 'zoom':          if (!isNaN(fv)) zoom         = fv;        redraw = true; break;
+      case 'xcen':          if (!isNaN(fv)) xcen         = fv;        redraw = true; break;
+      case 'ycen':          if (!isNaN(fv)) ycen         = fv;        redraw = true; break;
+      case 'depth':         if (!isNaN(iv)) depth        = iv;        redraw = true; break;
+      case 'glow':          if (!isNaN(iv)) glow         = iv / 1000; redraw = true; break;
+      case 'brightness':    if (!isNaN(iv)) brightness   = iv / 100;  redraw = true; break;
+      case 'complexScale':  if (!isNaN(fv)) complexScale = fv;        redraw = true; break;
+      case 'alg':           if (!isNaN(iv)) alg          = iv;        redraw = true; break;
+      case 'scalePoint':    scalePoint    = val === '1';               redraw = true; break;
+      case 'compoundPoint': compoundPoint = val === '1';               redraw = true; break;
+      case 'recurse':       recurse       = val === '1';               redraw = true; break;
+      case 'mandelbrot':    mandelbrot    = val === '1';               redraw = true; break;
+      case 'cx':            if (!isNaN(fv)) cx = fv;                   redraw = true; break;
+      case 'cy':            if (!isNaN(fv)) cy = fv;                   redraw = true; break;
+    }
+  }
+  return redraw;
+}
+
+// ---------------------------------------------------------------------------
 // Canvas / reset
 // ---------------------------------------------------------------------------
 
@@ -401,13 +455,294 @@ function stopRendering() {
 }
 
 // ---------------------------------------------------------------------------
+// WebGPU GPU path — mirrors the structure used by newton.js.
+// TAYLOR_PIXEL_WGSL is a direct WGSL port of computePixel().
+// ---------------------------------------------------------------------------
+
+var TAYLOR_PIXEL_WGSL = `
+struct Params {
+  width:        u32,
+  height:       u32,
+  depth:        u32,
+  alg:          u32,
+  scalePoint:   u32,
+  compoundPoint:u32,
+  recurse:      u32,
+  mandelbrot:   u32,
+  zoom:         f32,
+  xcen:         f32,
+  ycen:         f32,
+  complexScale: f32,
+  cx:           f32,
+  cy:           f32,
+  glow:         f32,
+  brightness:   f32,
+};
+
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read_write> outPixels: array<vec4<f32>>;
+
+const MATH_E: f32 = 2.718281828459045;
+
+fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x);
+}
+fn cdiv(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let d = dot(b, b);
+  if (d == 0.0) { return vec2<f32>(0.0, 0.0); }
+  return vec2<f32>((a.x*b.x + a.y*b.y)/d, (a.y*b.x - a.x*b.y)/d);
+}
+fn clog(v: vec2<f32>) -> vec2<f32> {
+  let r = length(v);
+  if (r == 0.0) { return vec2<f32>(-1e30, 0.0); }
+  return vec2<f32>(log(r), atan2(v.y, v.x));
+}
+fn csinh(v: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(sinh(v.x)*cos(v.y), cosh(v.x)*sin(v.y));
+}
+fn ccot(v: vec2<f32>) -> vec2<f32> {
+  let sinZ = vec2<f32>(sin(v.x)*cosh(v.y),  cos(v.x)*sinh(v.y));
+  let cosZ = vec2<f32>(cos(v.x)*cosh(v.y), -sin(v.x)*sinh(v.y));
+  return cdiv(cosZ, sinZ);
+}
+fn cpow_real(z: vec2<f32>, n: f32) -> vec2<f32> {
+  if (n == 0.0) { return vec2<f32>(1.0, 0.0); }
+  let r = length(z);
+  if (r == 0.0) { return vec2<f32>(0.0, 0.0); }
+  let rn = pow(r, n);
+  let theta = atan2(z.y, z.x) * n;
+  return vec2<f32>(rn*cos(theta), rn*sin(theta));
+}
+fn isFiniteVec(v: vec2<f32>) -> bool {
+  return all(abs(v) < vec2<f32>(1e30, 1e30));
+}
+fn zfunc(z: vec2<f32>) -> vec2<f32> {
+  let one = vec2<f32>(1.0, 0.0);
+  if (P.alg == 0u) { return cpow_real(z, MATH_E); }
+  if (P.alg == 1u) { return clog(cdiv(one + z, one - z)); }
+  return csinh(z);
+}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= P.width || gid.y >= P.height) { return; }
+  let xi = gid.x; let yi = gid.y;
+  let idx = yi * P.width + xi;
+  let xf = f32(xi) / f32(P.width);
+  let yf = f32(yi) / f32(P.height);
+  let aspect = f32(P.width) / f32(P.height);
+  let a = 2.0*(xf - 0.5)*P.zoom*aspect + P.xcen;
+  let b = 2.0*(yf - 0.5)*P.zoom + P.ycen;
+  let current_init = vec2<f32>(a, b);
+  let two  = vec2<f32>(2.0, 0.0);
+  let zvalue  = zfunc(current_init);
+  let point   = cpow_real(current_init, MATH_E) + vec2<f32>(P.cx, P.cy);
+  var zSum    = vec2<f32>(0.0, 0.0);
+  var current = current_init;
+  var xavg = 0.0; var yavg = 0.0; var mavg = 0.0;
+  var xmax = 0.0; var ymax = 0.0; var mmax = 0.0;
+  var xtot = 0.0; var ytot = 0.0; var mtot = 0.0;
+  var den  = 1.0;
+  var den2 = 1.0;
+  for (var count = 0u; count < P.depth; count++) {
+    var scale    = vec2<f32>(1.0, P.complexScale);
+    let oldcurrent = current;
+    if (P.scalePoint    != 0u) { scale = zfunc(point); }
+    if (P.compoundPoint != 0u) { current = current - point; }
+    if (count > 0u) {
+      den  *= f32(count);
+      den2 *= f32(count * 2u + 1u);
+    }
+    if (P.alg == 0u) {
+      zSum += cdiv(cmul(scale, cpow_real(current, f32(count))), vec2<f32>(den, 0.0));
+    } else if (P.alg == 1u) {
+      let twoN1 = f32(count) * 2.0 - 1.0;
+      if (twoN1 != 0.0) {
+        zSum += cdiv(cmul(scale, cmul(two, cpow_real(current, twoN1))), vec2<f32>(twoN1, 0.0));
+      }
+    } else {
+      zSum += cdiv(cmul(scale, cpow_real(current, den2)), vec2<f32>(den2, 0.0));
+    }
+    if (P.mandelbrot != 0u) { zSum = cmul(zSum, zvalue - zSum); }
+    if (P.recurse    == 0u) { current = oldcurrent; }
+    let value = ccot(zSum);
+    if (isFiniteVec(value)) {
+      let x = length(cpow_real(value, 0.1));
+      let y = length(cpow_real(value, 0.5));
+      let m = length(cpow_real(value, 0.9));
+      if (xavg == 0.0) { xavg = x; yavg = y; mavg = m; }
+      let xdev = abs(x - xavg); let ydev = abs(y - yavg); let mdev = abs(m - mavg);
+      xavg = x * 0.5 + xavg * (0.5 + 0.01 * P.glow);
+      yavg = y * 0.5 + yavg * (0.5 + 0.1  * P.glow);
+      mavg = m * 0.5 + mavg * (0.5 + 1.0  * P.glow);
+      if (xdev > xmax) { xmax = xdev; }
+      if (ydev > ymax) { ymax = ydev; }
+      if (mdev > mmax) { mmax = mdev; }
+      xtot += xdev; ytot += ydev; mtot += mdev;
+    }
+  }
+  let bf = pow(f32(P.depth), 2.01 - P.brightness);
+  var red = 0.0; var green = 0.0; var blue = 0.0;
+  if (bf > 0.0) {
+    if (xmax > 0.0) { red   = (xtot * 255.0 / bf) / xmax; }
+    if (ymax > 0.0) { green = (ytot * 255.0 / bf) / ymax; }
+    if (mmax > 0.0) { blue  = (mtot * 255.0 / bf) / mmax; }
+  }
+  outPixels[idx] = vec4<f32>(red, green, blue, 0.0);
+}
+`;
+
+var TAYLOR_GPU_PARAMS_BYTES = 64;
+var TAYLOR_GPU_WORKGROUP_X  = 16;
+var TAYLOR_GPU_WORKGROUP_Y  = 16;
+
+var taylorGPU         = null;
+var taylorGPUDisabled = false;
+
+// ---------------------------------------------------------------------------
 // Public draw / reset
 // ---------------------------------------------------------------------------
+
+function isTaylorWebGPUSupported() {
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
+}
+
+function destroyTaylorGPU() {
+  if (!taylorGPU) return;
+  var bufs = ['paramsBuf', 'outputBuf', 'readBuf'];
+  for (var i = 0; i < bufs.length; i++) {
+    try { taylorGPU[bufs[i]].destroy(); } catch(e) {}
+  }
+  taylorGPU = null;
+}
+
+async function initTaylorGPU(resultCount) {
+  if (taylorGPUDisabled || !isTaylorWebGPUSupported()) return null;
+  if (taylorGPU && taylorGPU.resultCapacity >= resultCount) return taylorGPU;
+  destroyTaylorGPU();
+  try {
+    var adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No WebGPU adapter');
+    var device = await adapter.requestDevice();
+    var outputBytes = resultCount * 4 * 4;
+    var paramsBuf = device.createBuffer({ size: TAYLOR_GPU_PARAMS_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    var outputBuf = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    var readBuf   = device.createBuffer({ size: outputBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    var module    = device.createShaderModule({ code: TAYLOR_PIXEL_WGSL });
+    var pipeline  = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: module, entryPoint: 'main' } });
+    var bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: outputBuf } },
+      ],
+    });
+    taylorGPU = {
+      device:         device,
+      resultCapacity: resultCount,
+      paramsBuf:      paramsBuf,
+      outputBuf:      outputBuf,
+      readBuf:        readBuf,
+      pipeline:       pipeline,
+      bindGroup:      bindGroup,
+      paramsBytes:    new ArrayBuffer(TAYLOR_GPU_PARAMS_BYTES),
+    };
+    return taylorGPU;
+  } catch(e) {
+    console.warn('Taylor WebGPU path disabled; falling back to CPU.', e);
+    taylorGPUDisabled = true;
+    destroyTaylorGPU();
+    return null;
+  }
+}
+
+function writeTaylorGPUParams(gpu, width, height) {
+  var u = new Uint32Array(gpu.paramsBytes);
+  var f = new Float32Array(gpu.paramsBytes);
+  u[0] = width  >>> 0;
+  u[1] = height >>> 0;
+  u[2] = (depth | 0) >>> 0;
+  u[3] = (alg   | 0) >>> 0;
+  u[4] = scalePoint    ? 1 : 0;
+  u[5] = compoundPoint ? 1 : 0;
+  u[6] = recurse       ? 1 : 0;
+  u[7] = mandelbrot    ? 1 : 0;
+  f[8]  = zoom;
+  f[9]  = xcen;
+  f[10] = ycen;
+  f[11] = complexScale;
+  f[12] = cx;
+  f[13] = cy;
+  f[14] = glow;
+  f[15] = brightness;
+  gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
+}
+
+async function calcTaylorPixelsGPU(gpu, width, height) {
+  writeTaylorGPUParams(gpu, width, height);
+  var outputBytes = width * height * 4 * 4;
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  var pass = encoder.beginComputePass();
+  pass.setPipeline(gpu.pipeline);
+  pass.setBindGroup(0, gpu.bindGroup);
+  pass.dispatchWorkgroups(
+    Math.ceil(width  / TAYLOR_GPU_WORKGROUP_X),
+    Math.ceil(height / TAYLOR_GPU_WORKGROUP_Y)
+  );
+  pass.end();
+  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
+  var range = gpu.readBuf.getMappedRange(0, outputBytes);
+  return {
+    pixels:  new Float32Array(range),
+    release: function() { try { gpu.readBuf.unmap(); } catch(e) {} },
+  };
+}
+
+async function renderGPU() {
+  try {
+    var resultCount = ximlen * yimlen;
+    var gpu = await initTaylorGPU(resultCount);
+    if (!gpu) return false;
+    var batch = await calcTaylorPixelsGPU(gpu, ximlen, yimlen);
+    if (!batch) return false;
+    var gpuImg = ctx.createImageData(ximlen, yimlen);
+    var data   = gpuImg.data;
+    var pixels = batch.pixels;
+    for (var idx = 0; idx < ximlen * yimlen; idx++) {
+      var off = idx * 4;
+      data[off]     = Math.min(255, Math.max(0, pixels[off]    )) | 0;
+      data[off + 1] = Math.min(255, Math.max(0, pixels[off + 1])) | 0;
+      data[off + 2] = Math.min(255, Math.max(0, pixels[off + 2])) | 0;
+      data[off + 3] = 255;
+    }
+    batch.release();
+    ctx.putImageData(gpuImg, 0, 0);
+    updateStatus('Done (GPU)');
+    return true;
+  } catch(e) {
+    console.warn('Taylor WebGPU render failed; falling back to CPU.', e);
+    taylorGPUDisabled = true;
+    destroyTaylorGPU();
+    return false;
+  }
+}
 
 function draw() {
   stopRendering();
   initCanvas();
   clearAndReset();
+  updateHashTag();
+  if (!taylorGPUDisabled && isTaylorWebGPUSupported()) {
+    updateStatus('Rendering (GPU)…');
+    renderGPU().then(function(ok) {
+      if (!ok) startRendering();
+    });
+    return;
+  }
   startRendering();
 }
 
@@ -539,6 +874,15 @@ function main() {
     link.click();
   };
 
+  window.onhashchange = function() {
+    if (location.hash.replace(/^#/, '') === lastWrittenHash) return;
+    if (readHashTag()) {
+      writeControls();
+      draw();
+    }
+  };
+
+  readHashTag();
   writeControls();
   draw();
 }
