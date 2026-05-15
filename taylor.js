@@ -102,6 +102,7 @@ var compoundPoint = false;
 var recurse       = false;
 var mandelbrot    = false;
 var alg           = 0;
+var baseFn        = 0;
 
 // Drag-to-zoom
 var dragBox = null;
@@ -123,6 +124,7 @@ function readControls() {
   recurse       = $('recurse').checked;
   mandelbrot    = $('mandelbrotMode').checked;
   alg           = parseInt($('algorithm').value, 10);
+  baseFn        = parseInt($('baseFn').value, 10);
 }
 
 function writeControls() {
@@ -138,6 +140,7 @@ function writeControls() {
   $('recurse').checked       = recurse;
   $('mandelbrotMode').checked = mandelbrot;
   $('algorithm').value = alg;
+  $('baseFn').value = baseFn;
 }
 
 function updateStatus(msg) {
@@ -159,6 +162,7 @@ function updateHashTag() {
           '&brightness='   + Math.round(brightness * 100) +
           '&complexScale=' + complexScale +
           '&alg='          + alg +
+          '&baseFn='       + baseFn +
           '&scalePoint='   + (scalePoint    ? '1' : '0') +
           '&compoundPoint='+ (compoundPoint ? '1' : '0') +
           '&recurse='      + (recurse       ? '1' : '0') +
@@ -187,6 +191,7 @@ function readHashTag() {
       case 'brightness':    if (!isNaN(iv)) brightness   = iv / 100;  redraw = true; break;
       case 'complexScale':  if (!isNaN(fv)) complexScale = fv;        redraw = true; break;
       case 'alg':           if (!isNaN(iv)) alg          = iv;        redraw = true; break;
+      case 'baseFn':        if (!isNaN(iv)) baseFn       = iv;        redraw = true; break;
       case 'scalePoint':    scalePoint    = val === '1';               redraw = true; break;
       case 'compoundPoint': compoundPoint = val === '1';               redraw = true; break;
       case 'recurse':       recurse       = val === '1';               redraw = true; break;
@@ -271,8 +276,15 @@ function computePixel(xi, yi) {
   var den  = 1;
   var den2 = 1;
 
-  // Expansion point: f(current)^e + (cx,cy)
-  var point = Complex.pow(current, Math.E).add(new Complex(cx, cy));
+  // Expansion point: f(current) + (cx,cy), where f is selected by baseFn
+  var point;
+  if (baseFn === 1) {
+    point = current.log().add(new Complex(cx, cy));
+  } else if (baseFn === 2) {
+    point = current.sinh().add(new Complex(cx, cy));
+  } else {
+    point = Complex.pow(current, Math.E).add(new Complex(cx, cy));
+  }
   var zSum  = new Complex(0, 0);
 
   for (var count = 0; count < depth; count++) {
@@ -302,22 +314,21 @@ function computePixel(xi, yi) {
     var denominator  = new Complex(den);
     var denominator2 = new Complex(den2);
 
+    var term = new Complex(0, 0);
     if (alg === 0) {
       // f(x) = x^n / n!   (Taylor series for e^x)
-      var num = scale.mul(Complex.pow(current, count));
-      zSum = zSum.add(num.div(denominator));
+      term = scale.mul(Complex.pow(current, count)).div(denominator);
     } else if (alg === 1) {
       // f(x) = 2x^(2n-1) / (2n-1)   (Taylor series for log((1+x)/(1-x)))
-      var twoN1 = new Complex(2 * count - 1);
-      if (twoN1.re !== 0) {
-        var num = scale.mul(two.mul(Complex.pow(current, twoN1)));
-        zSum = zSum.add(num.div(twoN1));
+      var twoN1 = 2 * count - 1;
+      if (twoN1 !== 0) {
+        term = scale.mul(two.mul(Complex.pow(current, twoN1))).div(new Complex(twoN1));
       }
     } else {
       // f(x) = x^(2n+1) / (2n+1)!   (Taylor series for sinh(x))
-      var num = scale.mul(Complex.pow(current, den2));
-      zSum = zSum.add(num.div(denominator2));
+      term = scale.mul(Complex.pow(current, den2)).div(denominator2);
     }
+    zSum = zSum.add(term);
 
     if (mandelbrot) {
       zSum = zSum.mul(zvalue.sub(zSum));
@@ -476,6 +487,7 @@ struct Params {
   cy:           f32,
   glow:         f32,
   brightness:   f32,
+  baseFn:       u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -542,7 +554,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let current_init = vec2<f32>(a, b);
   let two  = vec2<f32>(2.0, 0.0);
   let zvalue  = zfunc(current_init);
-  let point   = cpow_real(current_init, MATH_E) + vec2<f32>(P.cx, P.cy);
+
+  var point: vec2<f32>;
+  if (P.baseFn == 1u) {
+    point = clog(current_init) + vec2<f32>(P.cx, P.cy);
+  } else if (P.baseFn == 2u) {
+    point = csinh(current_init) + vec2<f32>(P.cx, P.cy);
+  } else {
+    point = cpow_real(current_init, MATH_E) + vec2<f32>(P.cx, P.cy);
+  }
   var zSum    = vec2<f32>(0.0, 0.0);
   var current = current_init;
   var xavg = 0.0; var yavg = 0.0; var mavg = 0.0;
@@ -553,7 +573,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var count = 0u; count < P.depth; count++) {
     var scale    = vec2<f32>(1.0, P.complexScale);
     let oldcurrent = current;
-    if (P.scalePoint    != 0u) { scale = zfunc(point); }
+    if (P.scalePoint != 0u) { 
+      let ns = zfunc(point);
+
+      // original
+      // scale = ns;
+
+      // f32 glitch mitigation
+      if (abs(ns.x) > 0.000005 || abs(ns.y) > 0.000005) {
+        scale = ns;
+      } else {
+         scale = point;
+      }
+    }
     if (P.compoundPoint != 0u) { current = current - point; }
     if (count > 0u) {
       den  *= f32(count);
@@ -587,7 +619,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       xtot += xdev; ytot += ydev; mtot += mdev;
     }
   }
-  let bf = pow(f32(P.depth), 2.01 - P.brightness);
+  let bf = pow(f32(P.depth), 2.1 - P.brightness);
   var red = 0.0; var green = 0.0; var blue = 0.0;
   if (bf > 0.0) {
     if (xmax > 0.0) { red   = (xtot * 255.0 / bf) / xmax; }
@@ -598,7 +630,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-var TAYLOR_GPU_PARAMS_BYTES = 64;
+var TAYLOR_GPU_PARAMS_BYTES = 80;
 var TAYLOR_GPU_WORKGROUP_X  = 16;
 var TAYLOR_GPU_WORKGROUP_Y  = 16;
 
@@ -681,6 +713,7 @@ function writeTaylorGPUParams(gpu, width, height) {
   f[13] = cy;
   f[14] = glow;
   f[15] = brightness;
+  u[16] = (baseFn | 0) >>> 0;
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
@@ -766,6 +799,7 @@ function resetAndDraw() {
   recurse       = false;
   mandelbrot    = false;
   alg           = 0;
+  baseFn        = 0;
   writeControls();
   draw();
 }
@@ -867,7 +901,7 @@ function main() {
   // Re-render automatically when any control changes
   var textIds     = ['depth', 'zoom', 'xcen', 'ycen', 'complexScale'];
   var toggleIds   = ['scalePoint', 'compoundPoint', 'recurse', 'mandelbrotMode'];
-  var selectIds   = ['algorithm'];
+  var selectIds   = ['algorithm', 'baseFn'];
 
   textIds.forEach(function(id) { $(id).onkeyup = draw; });
   $('brightnessSlider').onchange = function() { draw(); };
