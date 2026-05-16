@@ -140,7 +140,7 @@ fn calcRay(start: vec3<f32>, steps: u32, step: vec3<f32>, bright: f32, fuzzy: f3
         let r = insideFractal(p);
         if (r.iter == P.iterations) { return 0.0; }
 
-        // ray has left the general area of the solid, stop tracing
+        // ray has left the general area of the solid, stop and assume not in shadow
         // (go a bit further out here to make volume lighting look good)
         if (r.iter < 2u) { break; }
     }
@@ -397,7 +397,7 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             let rnd = nextRand(&rng);
             stepAmount = (P.stepDetail + rnd * P.stepDetail) *
                          (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
-                         P.root_zoom * 0.5;
+                         max(P.root_zoom,0.2);
 
             // and for points not in the set, optionally plot traces that act as a fog / glow
             if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {

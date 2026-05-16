@@ -196,6 +196,7 @@ function setZoom(z)
 	zoom = z;
 	root_zoom = Math.pow(zoom, 0.5);
 	ray_step = rayDetail*zoom;
+	console.log("ray_step " + ray_step);
 }
 	
 function reDraw()
@@ -854,10 +855,11 @@ function readHashTag()
 				break;
 			}
 			case 'palette': {
-				if (palettes[val]) {
-					pallet = palettes[val];
-					$("colorPalette").value = val;
-					console.log("readHashTag() palette : " + val);
+				var paletteName = decodeURIComponent(val);
+				if (palettes[paletteName]) {
+					pallet = palettes[paletteName];
+					$("colorPalette").value = paletteName;
+					console.log("readHashTag() palette : " + paletteName);
 				}
 				break;
 			}
@@ -874,5 +876,5 @@ function updateHashTag()
 	$("zoomInput").value = zoom;
 	$("xcenInput").value = xcen;
 	$("ycenInput").value = ycen;
-	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + $("colorPalette").value;
+	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + encodeURIComponent($("colorPalette").value);
 }
