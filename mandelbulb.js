@@ -24,12 +24,15 @@ var mode = 0;
 // detail level
 var rayDetail = 0.003;
 var stepDetail = 0.028;
-var frost = 1.0;
+
+// higher values here can reduce cloudiness at higher zooms since it biases points 
+// near the already-found surface
+var frost = 2.0;
 
 // ray traced lighting
 var LightVector = [ 0.12, 0.15, -0.19 ];
 var AMBIENT_LIGHT = 8.0;
-var RAY_STEPS = 25;
+var RAY_STEPS = 80;
 var ray_step;
 var primary_light = 28.0;
 var shadow_darkness = 30.0;
@@ -195,7 +198,9 @@ function setZoom(z)
 {
 	zoom = z;
 	root_zoom = Math.pow(zoom, 0.5);
-	ray_step = rayDetail*zoom;
+
+	// at zoom < 0.001 higher values result in better shadows, lower values result in sharp images
+	ray_step = rayDetail*Math.max(0.002, zoom);
 	console.log("ray_step " + ray_step);
 }
 	
@@ -306,9 +311,7 @@ function gpuStatsCallback(s) {
 	if (typeof s.max_alpha === 'number') {
 		max_alpha = Math.pow(Math.max(s.max_alpha, 1.0), gradient);
 	}
-	const completeness = Math.round(max_alpha*100)/100.0;
-	$('renderTime').innerHTML = s.elapsedSec.toFixed(1) + " pass: " + s.pass + " (" + completeness + ")";
-	$('renderSpeed').innerHTML = Math.round(s.pixelsPerSec/1000) + "k px/sec";
+	$('renderSpeed').innerHTML = Math.round(s.pixelsPerSec/1000) + "k px/sec pass: " + s.pass;
 }
 
 function render(startScanning)
@@ -381,7 +384,6 @@ function render(startScanning)
 		var now = (new Date).getTime();
 		if ((now - lastUpdate) >= 10000) {
 			var elapsed = (now - start) / 1000.0;
-			$('renderTime').innerHTML = elapsed.toFixed(1) + " pass: " + renderpass;
 			$('renderSpeed').innerHTML = Math.floor(pixels / elapsed) + " px/sec";
 			lastUpdate = now;
 		}
@@ -791,9 +793,20 @@ function readHashTag()
 			case 'ycen': {
 				ycen = parseFloat(val);
 				console.log("readHashTag() ycen : " + ycen);
-				reDraw = true;
 				break;
-			} 
+			}
+			case 'contrast': {
+				gradient = parseFloat(val);
+				$("contrastSlider").value = gradient * 100;
+				console.log("readHashTag() contrast : " + gradient);
+				break;
+			}
+			case 'brightness': {
+				brightness = parseFloat(val);
+				$("brightnessSlider").value = brightness * 100;
+				console.log("readHashTag() brightness : " + brightness);
+				break;
+			}
 			case 'power': {
 				power = parseFloat(val);
 				$("power").value = power;
@@ -870,11 +883,29 @@ function readHashTag()
 /*
  * Update URL's hash with render parameters so we can pass it around.
  */
+var lastSetHash = "";
 function updateHashTag()
 {
 	console.log("updateHashTag(): " + zoom);
 	$("zoomInput").value = zoom;
 	$("xcenInput").value = xcen;
 	$("ycenInput").value = ycen;
-	location.hash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + encodeURIComponent($("colorPalette").value);
+	var newHash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + encodeURIComponent($("colorPalette").value);
+	lastSetHash = '#' + newHash;
+	location.hash = newHash;
+}
+
+/*
+ * Re-render when the user edits the URL hash and presses Enter.
+ * Skip the event when it was triggered by our own updateHashTag() call.
+ */
+window.onhashchange = function()
+{
+	if (location.hash === lastSetHash) return;
+	console.log("hashchange: re-reading parameters from URL");
+	readHashTag();
+	setZoom(zoom);
+	reset = 1;
+	setCamera();
+	draw(false);
 }

@@ -15,7 +15,7 @@
 // ---------- WGSL ----------
 
 var GPU_RENDER_WGSL = `
-const MAX_DEPTH_STEPS: u32 = 1024u;
+const MAX_DEPTH_STEPS: u32 = 8192u;
 const MAX_GOODPOINTS: u32  = 5u;
 
 struct Params {
@@ -80,6 +80,7 @@ fn insideFractal(c: vec3<f32>) -> InsideResult {
     var iter: u32 = 0u;
     var color: f32 = 0.0;
     var r: f32 = 0.0;
+    var first_r: f32 = 0.0;
     let pwr = P.power; let az = P.azimuth;
     let formula = P.formula; let maxIter = P.iterations;
     for (var i: u32 = 0u; i < maxIter; i = i + 1u) {
@@ -100,7 +101,16 @@ fn insideFractal(c: vec3<f32>) -> InsideResult {
             let cp = cos(phi * pwr);
             p = vec3<f32>(r_p*ct*ps, r_p*st*ps, r_p*cp*az) + c;
         }
-        color = phi / 3.0;
+
+        if (P.zoom < 0.05) {
+            color = first_r / (r+0.001);
+        } else {
+            color = phi / 3.0;
+        }
+        if (first_r == 0) {
+            first_r = r;
+        }
+
         iter = iter + 1u;
         if (r >= 8.0) { break; }
     }
@@ -230,8 +240,6 @@ fn plotSurface(sx: u32, sy: u32, depth: f32, color: f32, lf: f32, rng: ptr<funct
         let bp = blurOffset(f32(sx), f32(sy), P.focus - depth, rng);
         let tx = i32(floor(bp.x)); let ty = i32(floor(bp.y));
         if (tx < 0 || ty < 0 || tx >= i32(P.ximlen) || ty >= i32(P.yimlen)) { return; }
-        let snap = occSnap[u32(tx) * P.yimlen + u32(ty)];
-        if (depth > snap + P.stepDetail) { return; }
         writeSurface(tx, ty, depth, color, lf);
     } else {
         writeSurface(i32(sx), i32(sy), depth, color, lf);
@@ -396,8 +404,8 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             // use much smaller and more accurate stepAmount
             let rnd = nextRand(&rng);
             stepAmount = (P.stepDetail + rnd * P.stepDetail) *
-                         (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
-                         max(P.root_zoom,0.2);
+                (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
+                max(P.root_zoom,0.03);
 
             // and for points not in the set, optionally plot traces that act as a fog / glow
             if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {

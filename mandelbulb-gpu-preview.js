@@ -118,8 +118,6 @@ float calculateRays(vec3 p, float rndFuzzy) {
     float n2 = rs / (15.0*h3 + 1.0);
     vec3 lv = u_lightVector;
 
-    lf += calculateRay(p, u_RAY_STEPS,   vec3(-n0,-n1,-n2),                                u_ambientLight, rndFuzzy);
-    lf += calculateRay(p, u_RAY_STEPS,   vec3( n0, n1, n2),                                u_ambientLight, rndFuzzy);
     lf += calculateRay(p, u_RAY_STEPS,   vec3( n0,-n1,-rs),                                u_ambientLight, rndFuzzy);
     lf += calculateRay(p, u_RAY_STEPS,   vec3(n0*lv.x*9.0, n1*lv.y*9.0, n2*lv.z*9.0),      u_ambientLight, rndFuzzy);
     lf += calculateRay(p, u_RAY_STEPS*4, vec3(rs*lv.x, rs*lv.y, rs*lv.z),                  u_primaryLight, rndFuzzy);
