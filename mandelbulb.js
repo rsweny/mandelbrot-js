@@ -32,7 +32,7 @@ var frost = 2.0;
 // ray traced lighting
 var LightVector = [ 0.12, 0.15, -0.19 ];
 var AMBIENT_LIGHT = 8.0;
-var RAY_STEPS = 80;
+var RAY_STEPS = 32;
 var ray_step;
 var primary_light = 28.0;
 var shadow_darkness = 30.0;
@@ -194,6 +194,11 @@ function setCamera()
 	IrotZ = RotateZ(-cameraYaw);
 }
 	
+function round7(v)
+{
+	return Math.round(v * 1e7) / 1e7;
+}
+
 function setZoom(z)
 {
 	zoom = z;
@@ -500,6 +505,127 @@ window.onresize = function(_event)
 	reInitCanvas = true;
 };
 
+var redrawLightWidget = function() {};  // set by setupLightWidget
+
+// Small trackball-style widget for rotating LightVector. Horizontal drag
+// rotates about the Y axis (mixes x and z), vertical drag rotates about the
+// X axis (mixes y and z). Magnitude is preserved.
+function setupLightWidget()
+{
+	var widget = $('lightWidget');
+	if (!widget) return;
+	var wctx = widget.getContext('2d');
+	var dragging = false;
+	var lastX = 0, lastY = 0;
+	var ROT_SPEED = 0.012;  // radians per pixel
+
+	function drawWidget()
+	{
+		var w = widget.width, h = widget.height;
+		var cx = w / 2, cy = h / 2;
+		var R = Math.min(cx, cy) - 6;
+
+		wctx.clearRect(0, 0, w, h);
+
+		// sphere outline
+		wctx.strokeStyle = '#555';
+		wctx.lineWidth = 1;
+		wctx.beginPath();
+		wctx.arc(cx, cy, R, 0, Math.PI * 2);
+		wctx.stroke();
+
+		// crosshair
+		wctx.strokeStyle = '#3a3a3a';
+		wctx.beginPath();
+		wctx.moveTo(cx - R, cy); wctx.lineTo(cx + R, cy);
+		wctx.moveTo(cx, cy - R); wctx.lineTo(cx, cy + R);
+		wctx.stroke();
+
+		var lx = LightVector[0], ly = LightVector[1], lz = LightVector[2];
+		var mag = Math.sqrt(lx*lx + ly*ly + lz*lz) || 1;
+
+		// Transform fractal-space light vector into the renderer's screen-aligned
+		// frame using the inverse camera rotations (same convention as reversePoint
+		// in the worker): v[0] = screen horizontal, v[1] = depth (smaller = closer
+		// to camera), v[2] = screen vertical (positive points down on screen).
+		var v = [0, 0, 0];
+		if (IrotZ && IrotX) {
+			var tmp = [0, 0, 0];
+			rotateVector(tmp, IrotZ, lx, ly, lz);
+			rotateVector(v, IrotX, tmp[0], tmp[1], tmp[2]);
+		} else {
+			v[0] = lx; v[1] = ly; v[2] = lz;
+		}
+		var nx = v[0] / mag, ny = v[1] / mag, nz = v[2] / mag;
+
+		// project onto widget: x right, screen-z down (renderer's +z is screen-down)
+		var px = cx + nx * R;
+		var py = cy + nz * R;
+
+		// dot size/brightness modulated by depth (ny): smaller y = in front of bulb = bright
+		var front = (1 - ny) * 0.5;  // 0..1, brighter when ny is negative (closer to camera)
+		var radius = 4 + front * 4;
+		var shade = Math.round(80 + front * 175);
+		wctx.fillStyle = 'rgb(' + shade + ',' + Math.round(shade * 0.85) + ',' + Math.round(shade * 0.3) + ')';
+		wctx.beginPath();
+		wctx.arc(px, py, radius, 0, Math.PI * 2);
+		wctx.fill();
+		wctx.strokeStyle = ny <= 0 ? '#FF3B03' : '#222';
+		wctx.lineWidth = 1;
+		wctx.stroke();
+
+		$('lightVecLabel').textContent =
+			lx.toFixed(3) + ', ' + ly.toFixed(3) + ', ' + lz.toFixed(3);
+	}
+
+	function rotate(dxPx, dyPx)
+	{
+		var ay = dxPx * ROT_SPEED;   // yaw: rotate around Y -> mixes x and z
+		var ax = dyPx * ROT_SPEED;   // pitch: rotate around X -> mixes y and z
+
+		var x = LightVector[0], y = LightVector[1], z = LightVector[2];
+
+		var cosY = Math.cos(ay), sinY = Math.sin(ay);
+		var x1 =  cosY * x + sinY * z;
+		var z1 = -sinY * x + cosY * z;
+
+		var cosX = Math.cos(ax), sinX = Math.sin(ax);
+		var y1 =  cosX * y + sinX * z1;
+		var z2 = -sinX * y + cosX * z1;
+
+		LightVector[0] = x1;
+		LightVector[1] = y1;
+		LightVector[2] = z2;
+	}
+
+	widget.addEventListener('mousedown', function(e) {
+		dragging = true;
+		lastX = e.clientX; lastY = e.clientY;
+		widget.style.cursor = 'grabbing';
+		e.preventDefault();
+		e.stopPropagation();
+	});
+	window.addEventListener('mousemove', function(e) {
+		if (!dragging) return;
+		var dx = e.clientX - lastX;
+		var dy = e.clientY - lastY;
+		lastX = e.clientX; lastY = e.clientY;
+		if (dx === 0 && dy === 0) return;
+		rotate(dx, dy);
+		drawWidget();
+		broadcastConfig();
+	});
+	window.addEventListener('mouseup', function() {
+		if (!dragging) return;
+		dragging = false;
+		widget.style.cursor = 'grab';
+		updateHashTag();
+	});
+
+	redrawLightWidget = drawWidget;
+	drawWidget();
+}
+
 function init()
 {
 	yimlen = canvas.height;
@@ -533,14 +659,14 @@ function main()
 	}
 
 	$("xcenInput").onchange = function() {
-		xcen = parseFloat($("xcenInput").value);
+		xcen = round7(parseFloat($("xcenInput").value));
 		updateHashTag();
 		reset = 1;
 		draw(false);
 	}
 
 	$("ycenInput").onchange = function() {
-		ycen = parseFloat($("ycenInput").value);
+		ycen = round7(parseFloat($("ycenInput").value));
 		updateHashTag();
 		reset = 1;
 		draw(false);
@@ -569,6 +695,8 @@ function main()
 		updateHashTag();
 		broadcastConfig();
 	}
+
+	setupLightWidget();
 
 	$("fog").onchange = function() {
 		fog_factor = parseFloat($("fog").value);
@@ -614,6 +742,7 @@ function main()
 		updateHashTag();
 		reset = 1;
 		setCamera();
+		redrawLightWidget();
 		draw(false);
 	}
 
@@ -622,6 +751,7 @@ function main()
 		updateHashTag();
 		reset = 1;
 		setCamera();
+		redrawLightWidget();
 		draw(false);
 	}
 
@@ -692,6 +822,10 @@ function main()
 
 	$('canvasControls').onmouseup = function(e)
 	{
+		// Ignore mouseup events that didn't originate from a canvas mousedown
+		// (e.g. releasing over the canvas after dragging the light widget).
+		if (!m_down) return;
+
 		console.log("mouse up!");
 		const half_ximlen = ximlen / 2;
 		const half_yimlen = yimlen / 2;
@@ -715,11 +849,11 @@ function main()
 	   	{
 			var newxcen = xanchor + dx/2.0;
 			newxcen = ((newxcen - half_ximlen)/ximlen)*zoom;
-			xcen = xcen - newxcen;
+			xcen = round7(xcen - newxcen);
 
 			var newycen = yanchor + dx/2.0;
 			newycen = ((newycen - half_yimlen)/yimlen)*zoom;
-			ycen = ycen - newycen;
+			ycen = round7(ycen - newycen);
 
 			console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
 			setZoom( (dx/ximlen)*zoom );
@@ -740,6 +874,7 @@ function main()
 	setZoom(zoom);
 	init();
 	updateHashTag();
+	redrawLightWidget();
 
 	// Fragment-shader GPU preview first, then kick off the WebGPU progressive
 	// renderer once it has finished initialising. If WebGPU is unavailable we
@@ -786,12 +921,12 @@ function readHashTag()
 				break;
 			} 
 			case 'xcen': {
-				xcen = parseFloat(val);
+				xcen = round7(parseFloat(val));
 				console.log("readHashTag() xcen : " + xcen);
 				break;
-			} 
+			}
 			case 'ycen': {
-				ycen = parseFloat(val);
+				ycen = round7(parseFloat(val));
 				console.log("readHashTag() ycen : " + ycen);
 				break;
 			}
@@ -823,6 +958,21 @@ function readHashTag()
 				primary_light = parseFloat(val);
 				$("primary_light").value = primary_light;
 				console.log("readHashTag() primary_light : " + primary_light);
+				break;
+			}
+			case 'light': {
+				var parts = val.split(',');
+				if (parts.length === 3) {
+					var lx = parseFloat(parts[0]);
+					var ly = parseFloat(parts[1]);
+					var lz = parseFloat(parts[2]);
+					if (isFinite(lx) && isFinite(ly) && isFinite(lz)) {
+						LightVector[0] = lx;
+						LightVector[1] = ly;
+						LightVector[2] = lz;
+						console.log("readHashTag() light : " + LightVector);
+					}
+				}
 				break;
 			}
 			case 'dof': {
@@ -890,7 +1040,8 @@ function updateHashTag()
 	$("zoomInput").value = zoom;
 	$("xcenInput").value = xcen;
 	$("ycenInput").value = ycen;
-	var newHash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&palette=" + encodeURIComponent($("colorPalette").value);
+	var lightStr = LightVector[0].toFixed(4) + ',' + LightVector[1].toFixed(4) + ',' + LightVector[2].toFixed(4);
+	var newHash = 'zoom=' + zoom + '&xcen=' + xcen + '&ycen=' + ycen + '&contrast=' + gradient + '&brightness=' + brightness + "&fog=" +  fog_factor + "&primary_light=" + primary_light + "&power=" + power + "&dof=" + cameraDOF + "&focus=" + focus + "&yaw=" + cameraYaw + "&pitch=" + cameraPitch + "&azimuth=" + azimuth + "&formula=" + formula + "&iterations=" + iterations + "&light=" + lightStr + "&palette=" + encodeURIComponent($("colorPalette").value);
 	lastSetHash = '#' + newHash;
 	location.hash = newHash;
 }

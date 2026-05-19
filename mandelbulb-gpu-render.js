@@ -15,8 +15,8 @@
 // ---------- WGSL ----------
 
 var GPU_RENDER_WGSL = `
-const MAX_DEPTH_STEPS: u32 = 8192u;
-const MAX_GOODPOINTS: u32  = 5u;
+const MAX_DEPTH_STEPS: u32 = 4096u;
+const MAX_GOODPOINTS: u32  = 16u;
 
 struct Params {
     M: array<vec4<f32>, 3>,

@@ -134,17 +134,12 @@
         <table>
         <tr>
         <td>Zoom</td>
-        <td><input id="zoomInput" class="textInput" type="number" value="3.0" step="0.01"/></td>
+        <td><input id="zoomInput" type="number" value="3.0" step="0.01"/></td>
         </tr>
 
         <tr>
-        <td>X Center</td>
-        <td><input id="xcenInput" class="textInput" type="number" value="0.0" step="0.001"/></td>
-        </tr>
-
-        <tr>
-        <td>Y Center</td>
-        <td><input id="ycenInput" class="textInput" type="number" value="0.0" step="0.001"/></td>
+        <td>Center</td>
+        <td><input id="xcenInput" type="number" value="0.0" style="width: 80px; margin: 0;"/><input id="ycenInput" type="number" value="0.0" style="width: 80px; margin: 0;"/></td>
         </tr>
 
         <tr>
@@ -168,17 +163,17 @@
         </tr>
 
         <tr>
-        <td>Camera Yaw</td>
+        <td>Yaw</td>
         <td><input id="cameraYaw" type="number" min="-3.14159" max="3.14159" value="0.1" step="0.01"/></td>
         </tr>
 
         <tr>
-        <td>Camera Pitch</td>
+        <td>Pitch</td>
         <td><input id="cameraPitch" type="number" min="-1.5707" max="1.5707" value="0.75" step="0.01"/></td>
         </tr>
 
         <tr>
-        <td>Depth of Field</td>
+        <td>DOF</td>
         <td><input id="DOF" type="number" min="-2" max="2" value="0" step="0.0001"/></td>
         </tr>
 
@@ -188,22 +183,27 @@
         </tr>
 
         <tr>
-        <td>Primary Light</td>
+        <td>Light</td>
         <td><input id="primary_light" type="number" min="1" max="100" value="28"/></td>
         </tr>
 
         <tr>
+        <td>Primary Light Direction</td>
+        <td>
+          <canvas id="lightWidget" width="110" height="110" style="background-color: rgba(48,48,48,0.3); border: #444 1px solid; cursor: grab; vertical-align: middle;"></canvas>
+          <div style="color:#888; font-size:9pt; margin-top:2px;">
+            <span id="lightVecLabel">0.00, 0.00, 0.00</span>
+          </div>
+        </td>
+        </tr>
+
+        <tr>
         <td>Trace Glow</td>
-        <td><input id="fog" type="number" min="0" max="2" value="0" step="0.01"/></td>
+        <td><input id="fog" type="number" min="0" max="2" value="0" step="0.01"/><input id="fogColor" type="color" value="#fafafa"/></td>
         </tr>
 
         <tr>
-        <td>Glow Color</td>
-        <td><input id="fogColor" type="color" value="#fafafa"/></td>
-        </tr>
-
-        <tr>
-        <td>Volumetric Fog</td>
+        <td>Volumetric</td>
         <td><input id="volumetricFog" type="checkbox" /></td>
         </tr>
 
@@ -265,7 +265,7 @@
       <div id="bottom">
         <small>
           <a href="https://github.com/rsweny/mandelbrot-js">Code on Github</a>
-          <br/> Click+drag to zoom in.<br/>
+          <br/> Click+drag to zoom in.
           <br/> Shift+click to temporarily show focus planes<br/>
           <br/>Live versions:
           <a href='mandelbrot.html'>mandelbrot</a> |
