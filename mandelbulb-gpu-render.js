@@ -15,7 +15,6 @@
 // ---------- WGSL ----------
 
 var GPU_RENDER_WGSL = `
-const MAX_DEPTH_STEPS: u32 = 4096u;
 const MAX_GOODPOINTS: u32  = 16u;
 
 struct Params {
@@ -34,7 +33,7 @@ struct Params {
     ray_step: f32, stepDetail: f32, root_zoom: f32, opacity: f32,
     frost: f32, fog_factor: f32, cameraDOF: f32, factorDOF: f32,
     focus: f32, focus_depth: f32, min_y: f32, max_y: f32,
-    useVolumetricFog: u32, _pad0: u32, _pad1: u32, _pad2: u32,
+    useVolumetricFog: u32, MAX_DEPTH_STEPS: u32, _pad1: u32, _pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -43,6 +42,10 @@ struct Params {
 @group(0) @binding(3) var<storage, read>       occSnap:  array<f32>;
 @group(0) @binding(4) var<storage, read>       palette:  array<vec4<f32>, 256>;
 @group(0) @binding(5) var<storage, read_write> maxAlpha: array<atomic<u32>>;
+// Single-element atomic reductions over surface depths (offset by HORIZON so
+// the float bit pattern is monotonic in u32 ordering, matching occLive).
+@group(0) @binding(6) var<storage, read_write> minYBits: array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> maxYBits: array<atomic<u32>>;
 
 // f32 atomic add via compare-exchange loop on bit-cast bits. Returns the new value.
 fn accAddF32(idx: u32, v: f32) -> f32 {
@@ -220,8 +223,13 @@ fn writeSurface(tx: i32, ty: i32, depth: f32, color: f32, lightFactor: f32) {
     accAddF32(idx + 2u, (pal.b * lightFactor) / P.shadow_darkness);
     let newAlpha = accAddF32(idx + 3u, 1.0);
     // Occlusion: atomicMin on f32 bits after offsetting depth so it is positive.
-    atomicMin(&occLive[occIdx(ux, uy)], bitcast<u32>(depth + P.HORIZON));
+    let depthBits = bitcast<u32>(depth + P.HORIZON);
+    atomicMin(&occLive[occIdx(ux, uy)], depthBits);
     atomicMax(&maxAlpha[0], bitcast<u32>(newAlpha));
+    // Global Y bounds across all surface hits; CPU reads these back per pass
+    // to tighten the depth-march range (mirrors updateMinMaxY in mandelbulb.js).
+    atomicMin(&minYBits[0], depthBits);
+    atomicMax(&maxYBits[0], depthBits);
 }
 
 fn blurOffset(x: f32, y: f32, blurFactor: f32, rng: ptr<function, u32>) -> vec2<f32> {
@@ -356,7 +364,7 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     var steps: u32 = 0u;
     loop {
         if (y >= P.max_y) { break; }
-        if (steps >= MAX_DEPTH_STEPS) { break; }
+        if (steps >= P.MAX_DEPTH_STEPS) { break; }
         steps = steps + 1u;
 
         let persp = 1.0 + y * P.cameraPersp;
@@ -366,7 +374,7 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (r.iter == P.iterations) {
 
             // point is in set so plot solid pixel
-            let fuzzy = max(P.opacity * nextRand(&rng), 0.4);
+            let fuzzy = max(P.opacity * nextRand(&rng), 0.2);
             var gp: GoodPoints;
             gp.cnt = 0u;
             let lf = 1.0 + calcRaysGP(p3, fuzzy, &rng, &gp);
@@ -405,7 +413,7 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             let rnd = nextRand(&rng);
             stepAmount = (P.stepDetail + rnd * P.stepDetail) *
                 (f32(P.iterations) / f32(max(r.iter, 1u)) / f32(P.iterations)) *
-                max(P.root_zoom,0.03);
+                max(P.root_zoom,0.01);
 
             // and for points not in the set, optionally plot traces that act as a fog / glow
             if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {
@@ -608,9 +616,26 @@ async function initGPURenderer(destCanvas, width, height) {
         size: 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
+    // Single-element atomic reductions for global Y bounds across surface hits.
+    const minYBuf = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+    const maxYBuf = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
     // CPU-mappable staging buffer for reading the per-pass peak alpha back so
     // gpuStatsCallback can update max_alpha (used by the PNG download name).
     const maxAlphaReadBuf = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    const minYReadBuf = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    const maxYReadBuf = device.createBuffer({
         size: 16,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
@@ -654,6 +679,8 @@ async function initGPURenderer(destCanvas, width, height) {
             { binding: 3, resource: { buffer: occSnapBuf } },
             { binding: 4, resource: { buffer: paletteBuf } },
             { binding: 5, resource: { buffer: maxAlphaBuf } },
+            { binding: 6, resource: { buffer: minYBuf } },
+            { binding: 7, resource: { buffer: maxYBuf } },
         ],
     });
     const toneBG = device.createBindGroup({
@@ -671,6 +698,7 @@ async function initGPURenderer(destCanvas, width, height) {
         width, height, pixelCount,
         paramsBuf, toneBuf, clearParamsBuf, snapParamsBuf,
         accumBuf, occLiveBuf, occSnapBuf, paletteBuf, maxAlphaBuf, maxAlphaReadBuf,
+        minYBuf, maxYBuf, minYReadBuf, maxYReadBuf,
         renderPipeline, clearPipeline, clearFPipeline, snapPipeline, tonePipeline,
         renderBG, toneBG,
         paramsBytes: new ArrayBuffer(GPU_PARAMS_BYTES),
@@ -713,8 +741,8 @@ function writeGPUParams(s, passSeed) {
     f[64] = s.ray_step;      f[65] = s.stepDetail;     f[66] = s.root_zoom;       f[67] = s.opacity;
     f[68] = s.frost;         f[69] = s.fog_factor;     f[70] = s.cameraDOF;       f[71] = s.factorDOF;
     f[72] = s.focus;         f[73] = s.focus_depth;    f[74] = s.min_y;           f[75] = s.max_y;
-    // useVolumetricFog + 3 padding u32s (slots 77..79) keep the struct 16-byte aligned.
-    u[76] = s.useVolumetricFog ? 1 : 0; u[77] = 0; u[78] = 0; u[79] = 0;
+    // useVolumetricFog + MAX_DEPTH_STEPS + 2 padding u32s (slots 78..79) keep the struct 16-byte aligned.
+    u[76] = s.useVolumetricFog ? 1 : 0; u[77] = s.MAX_DEPTH_STEPS; u[78] = 0; u[79] = 0;
     _gpu.device.queue.writeBuffer(_gpu.paramsBuf, 0, _gpu.paramsBytes);
 }
 
@@ -777,6 +805,15 @@ function _ensureFillData(HORIZON) {
     const maxAlphaFill = new Uint32Array(1);
     maxAlphaFill[0] = new Uint32Array(new Float32Array([1.0]).buffer)[0];
     _gpu.maxAlphaFillData = maxAlphaFill.buffer;
+
+    // minYBits seeded to bits(HORIZON+HORIZON) ("+infinity" in the shifted
+    // space, matching occLive); maxYBits seeded to bits(0.0) ("-infinity").
+    const minYFill = new Uint32Array(1);
+    minYFill[0] = occLiveBits;
+    _gpu.minYFillData = minYFill.buffer;
+    const maxYFill = new Uint32Array(1);
+    maxYFill[0] = 0;
+    _gpu.maxYFillData = maxYFill.buffer;
 }
 
 // Full reset: zero accum, seed occLive / occSnap to HORIZON sentinels, reset
@@ -794,6 +831,8 @@ function resetGPUAccumulators(HORIZON) {
     d.queue.writeBuffer(_gpu.occLiveBuf, 0, _gpu.occLiveFillData);
     d.queue.writeBuffer(_gpu.occSnapBuf, 0, _gpu.occSnapFillData);
     d.queue.writeBuffer(_gpu.maxAlphaBuf, 0, _gpu.maxAlphaFillData);
+    d.queue.writeBuffer(_gpu.minYBuf, 0, _gpu.minYFillData);
+    d.queue.writeBuffer(_gpu.maxYBuf, 0, _gpu.maxYFillData);
 }
 
 // Clear occLive at the start of every pass (fresh surface depths each pass).
@@ -802,6 +841,14 @@ function resetGPUAccumulators(HORIZON) {
 function _clearOccLive(HORIZON) {
     _ensureFillData(HORIZON);
     _gpu.device.queue.writeBuffer(_gpu.occLiveBuf, 0, _gpu.occLiveFillData);
+}
+
+// Reset the global Y-bound atomics back to their sentinels so the next pass's
+// reduction starts from scratch. Caller pairs this with a CPU-side widening of
+// min_y/max_y to give the depth march a chance to discover outlier surfaces.
+function _clearYBounds() {
+    _gpu.device.queue.writeBuffer(_gpu.minYBuf, 0, _gpu.minYFillData);
+    _gpu.device.queue.writeBuffer(_gpu.maxYBuf, 0, _gpu.maxYFillData);
 }
 
 function _snapOcclusion(encoder, HORIZON) {
@@ -848,6 +895,14 @@ async function _gpuFrame(stateFn, onStats) {
     // is ordered with the subsequent queue.submit() so the dispatch reads the
     // seeded occLive values.
     _clearOccLive(s.HORIZON);
+
+    // Every 8 passes, also reset the global Y-bound atomics. Paired with the
+    // CPU-side widening in gpuStateFn this lets the depth march briefly explore
+    // a slab outside the previously-tight bounds, picking up any outlier
+    // surface points that earlier passes missed before re-converging.
+    if (_gpuPassIndex > 0 && _gpuPassIndex % 8 === 0) {
+        _clearYBounds();
+    }
 
     // Render in tiles, each in its own command buffer, so no single GPU
     // command list runs long enough to trip Windows' GPU TDR. Atomic writes
@@ -904,10 +959,12 @@ async function _gpuFrame(stateFn, onStats) {
     tonePass.draw(3);
     tonePass.end();
 
-    // Stage maxAlpha for CPU readback. Cheap (4 bytes) and only when stats
-    // are wired up.
+    // Stage maxAlpha + global Y bounds for CPU readback. Cheap (4 bytes each)
+    // and only when stats are wired up.
     if (onStats) {
         finalEnc.copyBufferToBuffer(_gpu.maxAlphaBuf, 0, _gpu.maxAlphaReadBuf, 0, 4);
+        finalEnc.copyBufferToBuffer(_gpu.minYBuf,     0, _gpu.minYReadBuf,     0, 4);
+        finalEnc.copyBufferToBuffer(_gpu.maxYBuf,     0, _gpu.maxYReadBuf,     0, 4);
     }
 
     d.queue.submit([finalEnc.finish()]);
@@ -916,15 +973,31 @@ async function _gpuFrame(stateFn, onStats) {
     if (_gpuGen !== genAtStart || !_gpuRunning) return;
 
     let peakAlpha = null;
+    let minYVal = null;
+    let maxYVal = null;
     if (onStats) {
-        await _gpu.maxAlphaReadBuf.mapAsync(GPUMapMode.READ, 0, 4);
+        await Promise.all([
+            _gpu.maxAlphaReadBuf.mapAsync(GPUMapMode.READ, 0, 4),
+            _gpu.minYReadBuf.mapAsync(GPUMapMode.READ, 0, 4),
+            _gpu.maxYReadBuf.mapAsync(GPUMapMode.READ, 0, 4),
+        ]);
         if (_gpuGen !== genAtStart || !_gpuRunning) {
             _gpu.maxAlphaReadBuf.unmap();
+            _gpu.minYReadBuf.unmap();
+            _gpu.maxYReadBuf.unmap();
             return;
         }
-        const mapped = _gpu.maxAlphaReadBuf.getMappedRange(0, 4);
-        peakAlpha = new Float32Array(mapped, 0, 1)[0];
+        peakAlpha = new Float32Array(_gpu.maxAlphaReadBuf.getMappedRange(0, 4), 0, 1)[0];
+        // minYBits / maxYBits are atomically-reduced bit patterns of (depth + HORIZON);
+        // subtract HORIZON to recover the depth in world space. If no surface was hit
+        // this pass the seeded sentinels persist (minY=HORIZON, maxY=-HORIZON).
+        const minRaw = new Float32Array(_gpu.minYReadBuf.getMappedRange(0, 4), 0, 1)[0];
+        const maxRaw = new Float32Array(_gpu.maxYReadBuf.getMappedRange(0, 4), 0, 1)[0];
         _gpu.maxAlphaReadBuf.unmap();
+        _gpu.minYReadBuf.unmap();
+        _gpu.maxYReadBuf.unmap();
+        minYVal = minRaw - s.HORIZON;
+        maxYVal = maxRaw - s.HORIZON;
     }
 
     // Blit the WebGPU canvas onto the main 2D canvas so the existing UI,
@@ -934,16 +1007,16 @@ async function _gpuFrame(stateFn, onStats) {
 
     if (onStats) {
         const now = (new Date()).getTime();
-        if (now - _gpuLastUpdateMs >= 1000) {
-            const elapsed = (now - _gpuStartMs) / 1000.0;
-            onStats({
-                pass: _gpuPassIndex,
-                elapsedSec: elapsed,
-                pixelsPerSec: Math.floor((_gpu.pixelCount * _gpuPassIndex) / Math.max(elapsed, 0.001)),
-                max_alpha: peakAlpha,
-            });
-            _gpuLastUpdateMs = now;
-        }
+        const elapsed = (now - _gpuStartMs) / 1000.0;
+        onStats({
+            pass: _gpuPassIndex,
+            elapsedSec: elapsed,
+            pixelsPerSec: Math.floor((_gpu.pixelCount * _gpuPassIndex) / Math.max(elapsed, 0.001)),
+            max_alpha: peakAlpha,
+            min_y: minYVal,
+            max_y: maxYVal,
+        });
+        _gpuLastUpdateMs = now;
     }
 
     // Sleep briefly, then schedule the next pass. The setTimeout yields back
@@ -961,6 +1034,12 @@ function startGPURender(stateFn, onStats) {
     _gpuStartMs = (new Date()).getTime();
     _gpuLastUpdateMs = _gpuStartMs;
     const s0 = stateFn();
+    if (!s0) {
+        // stateFn signalled a reset path (preview + delayed restart) before
+        // we even began; abort this start and let that restart take over.
+        _gpuRunning = false;
+        return false;
+    }
     resetGPUAccumulators(s0.HORIZON);
     requestAnimationFrame(function() { _gpuFrame(stateFn, onStats); });
     return true;

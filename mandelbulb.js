@@ -33,6 +33,7 @@ var frost = 2.0;
 var LightVector = [ 0.12, 0.15, -0.19 ];
 var AMBIENT_LIGHT = 8.0;
 var RAY_STEPS = 32;
+var MAX_DEPTH_STEPS = 4096;
 var ray_step;
 var primary_light = 28.0;
 var shadow_darkness = 30.0;
@@ -66,7 +67,7 @@ var cameraPitch = 0.75;
 var cameraDOF = 0.0;
 var focus_depth = 1.0;
 var focus = -0.15; // higher values for further distance in focus.
-const FOCUS_WINDOW = 0.2 // 20% of depth of field is in focus
+const FOCUS_WINDOW = 0.5 // 50% of depth of field is in focus
 
 var opacity = 1.4;
 
@@ -205,7 +206,8 @@ function setZoom(z)
 	root_zoom = Math.pow(zoom, 0.5);
 
 	// at zoom < 0.001 higher values result in better shadows, lower values result in sharp images
-	ray_step = rayDetail*Math.max(0.002, zoom);
+	const adjRayStep = zoom < 0.003 ? 0.0015 : 0.008;
+	ray_step = rayDetail*Math.max(adjRayStep, zoom);
 	console.log("ray_step " + ray_step);
 }
 	
@@ -284,6 +286,18 @@ function gpuStateFn() {
 		reset = 0;
 	}
 	var passIdx = getGPUPassIndex();
+	// Every 8 passes, pad the depth-march range outwards so the GPU briefly
+	// explores a wider slab. Paired with _clearYBounds on the GPU side, this
+	// gives the atomic min/max reduction a chance to discover surface points
+	// just outside the previously-tight bounds, then re-converge over the
+	// next several passes.
+	var passMinY = min_y;
+	var passMaxY = max_y;
+	if (passIdx > 0 && passIdx % 8 === 0) {
+		var pad = 10 * stepDetail;
+		passMinY = min_y - pad;
+		passMaxY = max_y + pad;
+	}
 	return {
 		ximlen: ximlen, yimlen: yimlen,
 		half_ximlen: ximlen / 2, half_yimlen: yimlen / 2,
@@ -295,6 +309,7 @@ function gpuStateFn() {
 		focus: focus, focus_depth: focus_depth,
 		cameraDOF: cameraDOF, factorDOF: cameraDOF * (ximlen / 3),
 		LightVector: LightVector, RAY_STEPS: RAY_STEPS,
+		MAX_DEPTH_STEPS: zoom < 0.01 ? MAX_DEPTH_STEPS : MAX_DEPTH_STEPS*2,
 		AMBIENT_LIGHT: AMBIENT_LIGHT, primary_light: primary_light,
 		shadow_darkness: shadow_darkness, HORIZON: HORIZON,
 		ray_step: ray_step,
@@ -304,10 +319,11 @@ function gpuStateFn() {
 		pallet: pallet,
 		gradient: gradient, brightness: brightness, drawFocus: drawFocus,
 		// Pass 0 is the rough depth-finder (frost/fog disabled via min_y == -2.0).
-		// Subsequent passes use the bulb's ~|p|<=1.5 bounding box; refinement
-		// beyond that would require reading occlusion back from the GPU.
-		min_y: (passIdx === 0 ? -2.0 : -1.8),
-		max_y: (passIdx === 0 ?  2.0 :  1.8)
+		// Subsequent passes use the live min_y/max_y refined by gpuStatsCallback
+		// from the GPU-side atomicMin/atomicMax reductions over surface depths,
+		// with a periodic 10*stepDetail widening (see passMinY/passMaxY above).
+		min_y: (passIdx === 0 ? -2.0 : passMinY),
+		max_y: (passIdx === 0 ?  2.0 : passMaxY)
 	};
 }
 
@@ -315,6 +331,16 @@ function gpuStatsCallback(s) {
 	renderpass = s.pass
 	if (typeof s.max_alpha === 'number') {
 		max_alpha = Math.pow(Math.max(s.max_alpha, 1.0), gradient);
+	}
+	// Tighten the depth-march range using bounds reduced on the GPU. The
+	// shader fills minY/maxY only when a surface is actually plotted, so we
+	// ignore the seed sentinels (HORIZON / -HORIZON) until the first hit.
+	if (typeof s.min_y === 'number' && typeof s.max_y === 'number' &&
+		s.min_y < HORIZON && s.max_y > -HORIZON && s.max_y > s.min_y) {
+		min_y = s.min_y - stepDetail;
+		max_y = s.max_y + stepDetail;
+		focus_depth = (max_y - min_y) * FOCUS_WINDOW;
+		console.log("GPU pass " + s.pass + " Y bounds: " + min_y.toFixed(4) + " to " + max_y.toFixed(4) + " (focus_depth " + focus_depth.toFixed(4) + ")");
 	}
 	$('renderSpeed').innerHTML = Math.round(s.pixelsPerSec/1000) + "k px/sec pass: " + s.pass;
 }
@@ -580,8 +606,8 @@ function setupLightWidget()
 
 	function rotate(dxPx, dyPx)
 	{
-		var ay = dxPx * ROT_SPEED;   // yaw: rotate around Y -> mixes x and z
-		var ax = dyPx * ROT_SPEED;   // pitch: rotate around X -> mixes y and z
+		var ay = -dxPx * ROT_SPEED;  // yaw: rotate around Y -> mixes x and z
+		var ax = dyPx * ROT_SPEED;  // pitch: rotate around X -> mixes y and z
 
 		var x = LightVector[0], y = LightVector[1], z = LightVector[2];
 
