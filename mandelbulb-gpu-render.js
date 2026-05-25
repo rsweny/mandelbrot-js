@@ -105,8 +105,8 @@ fn insideFractal(c: vec3<f32>) -> InsideResult {
             p = vec3<f32>(r_p*ct*ps, r_p*st*ps, r_p*cp*az) + c;
         }
 
-        if (P.zoom < 0.05) {
-            color = first_r / (r+0.001);
+        if (P.zoom < 0.05 && P.iterations < 9) {
+            color = first_r*0.1 / (r+0.001);
         } else {
             color = phi / 3.0;
         }
@@ -314,7 +314,7 @@ fn fogTrace(c: vec3<f32>, factor: f32, fuzzy: f32, rng: ptr<function, u32>) {
         if (r >= 8.0) { break; }
 
         // glow spikes fog for even iterations
-        if (i > 0u || maxIter % 2 == 0) {
+        if (i > 1u || maxIter % 2 == 0) {
             var volumetricLightFactor: f32 = 1.0;
             if (P.useVolumetricFog != 0u) {
                 
@@ -416,7 +416,7 @@ fn renderMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 max(P.root_zoom,0.01);
 
             // and for points not in the set, optionally plot traces that act as a fog / glow
-            if (P.fog_factor > 0.0 && rnd > 0.9 && r.iter > 1u) {
+            if (P.fog_factor > 0.0 && rnd > 0.9) {
                 let fogFuzzy = max(P.opacity * nextRand(&rng), 0.4);
                 fogTrace(p3, P.fog_factor, fogFuzzy, &rng);
             }

@@ -205,8 +205,8 @@ function setZoom(z)
 	zoom = z;
 	root_zoom = Math.pow(zoom, 0.5);
 
-	// at zoom < 0.001 higher values result in better shadows, lower values result in sharp images
-	const adjRayStep = zoom < 0.003 ? 0.0015 : 0.008;
+	// at zoom < 0.02 higher values result in better shadows, lower values result in sharp images
+	const adjRayStep = zoom < 0.02 ? 0.0015 : 0.008;
 	ray_step = rayDetail*Math.max(adjRayStep, zoom);
 	console.log("ray_step " + ray_step);
 }
@@ -600,8 +600,7 @@ function setupLightWidget()
 		wctx.lineWidth = 1;
 		wctx.stroke();
 
-		$('lightVecLabel').textContent =
-			lx.toFixed(3) + ', ' + ly.toFixed(3) + ', ' + lz.toFixed(3);
+		$('lightVecLabel').textContent = lx.toFixed(3) + ', ' + ly.toFixed(3) + ', ' + lz.toFixed(3);
 	}
 
 	function rotate(dxPx, dyPx)
@@ -882,6 +881,8 @@ function main()
 			ycen = round7(ycen - newycen);
 
 			console.log(dx + " " + dy + " Xcen is " + xcen + " Ycen is " + ycen);
+			primary_light = primary_light*1.2;
+			$("primary_light").value = primary_light;
 			setZoom( (dx/ximlen)*zoom );
 			reset = 1;
 			setCamera();
