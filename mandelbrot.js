@@ -35,6 +35,9 @@ var mandelGPU = null;
 var mandelGPUDisabled = false;
 var mandelGPUStatus = 'CPU';
 var mandelGPUInFlight = false;
+// Serialises GPU renders: a new draw chains onto the previous render's
+// promise instead of bailing to the CPU path while the GPU is still busy.
+var mandelGPURenderPromise = null;
 
 var MANDEL_PIXEL_WGSL = `
 struct Params {
@@ -45,7 +48,7 @@ struct Params {
   doOrbit: u32,
   orbitType: u32,
   doOrbitAverage: u32,
-  _pad: u32,
+  rowOffset: u32,
   xStart: f32,
   yStart: f32,
   dx: f32,
@@ -54,6 +57,10 @@ struct Params {
   orbitTrap: f32,
   orbitRealPoint: f32,
   orbitImgPoint: f32,
+  passIndex: u32,
+  _pad0: u32,
+  _pad1: u32,
+  _pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -130,25 +137,24 @@ fn iterateMandelbrotGpu(Cr: f32, Ci: f32) -> vec4<f32> {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
-
+  // gid.y indexes rows within the current band; map it back to an absolute
+  // image row via P.rowOffset so every band writes into the shared buffer.
   let x = gid.x;
-  let sampleY = gid.y;
-  let y = sampleY / P.samples;
-  let sampleIdx = sampleY - y * P.samples;
+  let y = P.rowOffset + gid.y;
+  if (x >= P.width || y >= P.height) { return; }
+
   let pixelIdx = y * P.width + x;
-  let idx = pixelIdx * P.samples + sampleIdx;
 
   var Cr = P.xStart + f32(x) * P.dx;
   var Ci = P.yStart + f32(y) * P.dy;
   if (P.samples > 1u) {
-    let rx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
-    let ry = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
+    let rx = hash01(pixelIdx * 1664525u + P.passIndex * 1013904223u + 17u);
+    let ry = hash01(pixelIdx * 22695477u + P.passIndex * 1103515245u + 29u);
     Cr = Cr - rx * P.dx * 0.5;
     Ci = Ci - ry * P.dy * 0.5;
   }
 
-  outPixels[idx] = iterateMandelbrotGpu(Cr, Ci);
+  outPixels[pixelIdx] = iterateMandelbrotGpu(Cr, Ci);
 }
 `;
 
@@ -179,8 +185,8 @@ struct Params {
   orbitRealPoint: f32,
   orbitImgPoint: f32,
   glitchEps: f32,
-  _pad0: f32,
-  _pad1: f32,
+  rowOffset: u32,
+  passIndex: u32,
   _pad2: f32,
 };
 
@@ -288,25 +294,24 @@ fn iteratePerturbGpu(dcr: f32, dci: f32) -> vec4<f32> {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
-
+  // gid.y indexes rows within the current band; map it back to an absolute
+  // image row via P.rowOffset so every band writes into the shared buffer.
   let x = gid.x;
-  let sampleY = gid.y;
-  let y = sampleY / P.samples;
-  let sampleIdx = sampleY - y * P.samples;
+  let y = P.rowOffset + gid.y;
+  if (x >= P.width || y >= P.height) { return; }
+
   let pixelIdx = y * P.width + x;
-  let idx = pixelIdx * P.samples + sampleIdx;
 
   var dcr = P.dcrStart + f32(x) * P.dx;
   var dci = P.dciStart + f32(y) * P.dy;
   if (P.samples > 1u) {
-    let rx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
-    let ry = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
+    let rx = hash01(pixelIdx * 1664525u + P.passIndex * 1013904223u + 17u);
+    let ry = hash01(pixelIdx * 22695477u + P.passIndex * 1103515245u + 29u);
     dcr = dcr - rx * P.dx * 0.5;
     dci = dci - ry * P.dy * 0.5;
   }
 
-  outPixels[idx] = iteratePerturbGpu(dcr, dci);
+  outPixels[pixelIdx] = iteratePerturbGpu(dcr, dci);
 }
 `;
 
@@ -326,10 +331,57 @@ var mandelGlitchTolerance = 1e-3;
 var mandelGPUPerturb = null;
 var mandelRefOrbitCache = null;
 
-var MANDEL_GPU_PARAMS_BYTES = 64;
+var MANDEL_GPU_PARAMS_BYTES = 80;
 var MANDEL_PERTURB_PARAMS_BYTES = 80;
 var MANDEL_GPU_WORKGROUP_X = 16;
 var MANDEL_GPU_WORKGROUP_Y = 16;
+
+// Row-band rendering keeps every GPU submission short enough to avoid the OS
+// GPU watchdog (TDR, ~2s) firing at high iteration counts.  Band height is
+// tuned per submission toward MANDEL_GPU_BAND_TARGET_MS, clamped so we neither
+// stall on one huge dispatch nor drown in per-dispatch overhead.
+var MANDEL_GPU_BAND_TARGET_MS = 1200;
+var MANDEL_GPU_INITIAL_BAND_ROWS = 1;
+var MANDEL_GPU_MIN_BAND_ROWS = 1;
+var MANDEL_GPU_MAX_BAND_ROWS = 512;
+
+// Brief pause between bands so the GPU isn't pinned at 100% for the whole
+// render, leaving room for the desktop compositor and other GPU work.
+var MANDEL_GPU_BAND_SLEEP_MS = 50;
+
+function mandelGPUSleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+function nextMandelbrotBandRows(currentRows, renderedRows, bandMS) {
+  var perRow = bandMS / Math.max(1, renderedRows);
+  var target = perRow > 0 ? Math.round(MANDEL_GPU_BAND_TARGET_MS / perRow) : currentRows * 2;
+  if (!isFinite(target) || target < 1) target = currentRows;
+  const rowBatch = Math.max(MANDEL_GPU_MIN_BAND_ROWS, Math.min(MANDEL_GPU_MAX_BAND_ROWS, target));
+  console.log("rowBatch " + rowBatch + " " + perRow + " " + renderedRows + " - " + bandMS);
+  return rowBatch;
+}
+
+// When a render runs longer than this, paint the rows completed so far at
+// most once per interval so deep / high-iteration frames show progress
+// instead of appearing to freeze until every band is done.
+var MANDEL_GPU_PROGRESS_MS = 1000;
+
+// Copy the first `rows` image rows out of the shared output buffer and return
+// them as a detached Float32Array that stays valid after unmap.  Used for the
+// periodic progressive repaint while the band loop is still running.
+async function readbackMandelbrotRows(gpu, width, rows) {
+  var bytes = width * rows * 4 * 4;
+  var d = gpu.device;
+  var encoder = d.createCommandEncoder();
+  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, bytes);
+  d.queue.submit([encoder.finish()]);
+  await d.queue.onSubmittedWorkDone();
+  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, bytes);
+  var copy = gpu.readBuf.getMappedRange(0, bytes).slice(0);
+  gpu.readBuf.unmap();
+  return new Float32Array(copy);
+}
 
 function isMandelbrotWebGPUSupported() {
   return typeof navigator !== 'undefined' && !!navigator.gpu;
@@ -390,7 +442,7 @@ async function initMandelbrotGPU(resultCount) {
   }
 }
 
-function writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps) {
+function writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps, rowOffset, passIndex) {
   var u = new Uint32Array(gpu.paramsBytes);
   var f = new Float32Array(gpu.paramsBytes);
   u[0] = width >>> 0;
@@ -400,7 +452,7 @@ function writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps
   u[4] = doOrbit ? 1 : 0;
   u[5] = orbitType >>> 0;
   u[6] = doOrbitAverage ? 1 : 0;
-  u[7] = 0;
+  u[7] = (rowOffset || 0) >>> 0;
   f[8] = xRange[0];
   f[9] = yRange[0];
   f[10] = dx;
@@ -409,36 +461,72 @@ function writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps
   f[13] = orbit_trap;
   f[14] = orbitRealPoint;
   f[15] = orbitImgPoint;
+  u[16] = (passIndex || 0) >>> 0;
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
-async function calcMandelbrotPixelsGPU(width, height, dx, dy, samples, steps) {
-  var sampleCount = Math.max(1, Math.min(4, parseInt(samples, 10) || 1));
-  var resultCount = width * height * sampleCount;
+// Render a single anti-aliasing pass: the GPU computes exactly one sample per
+// pixel.  `samples` is the total pass count (so the shader knows whether to
+// jitter at all) and `passIndex` selects this pass's jitter offset.  Multiple
+// passes are blended on the CPU side, keeping each GPU submission small enough
+// to dodge the OS GPU watchdog (TDR) regardless of the supersample count.
+async function calcMandelbrotPixelsGPU(width, height, dx, dy, samples, steps, passIndex, onProgress, shouldContinue) {
+  var sampleCount = Math.max(1, parseInt(samples, 10) || 1);
+  var resultCount = width * height;
   var gpu = await initMandelbrotGPU(resultCount);
   if (!gpu) return null;
 
-  writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps);
   var outputBytes = resultCount * 4 * 4;
   var d = gpu.device;
-  var encoder = d.createCommandEncoder();
-  var pass = encoder.beginComputePass();
-  pass.setPipeline(gpu.pipeline);
-  pass.setBindGroup(0, gpu.bindGroup);
-  pass.dispatchWorkgroups(
-    Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
-    Math.ceil((height * sampleCount) / MANDEL_GPU_WORKGROUP_Y)
-  );
-  pass.end();
-  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
-  d.queue.submit([encoder.finish()]);
+
+  // Render in horizontal bands so no single GPU submission runs long enough
+  // to trip the OS GPU watchdog (TDR).  Every band writes into the same
+  // output buffer; the buffer is read back once after the last band.
+  var bandRows = MANDEL_GPU_INITIAL_BAND_ROWS;
+  var lastProgress = (new Date).getTime();
+  for (var rowOffset = 0; rowOffset < height;) {
+    // Bail between bands once a newer render has superseded this one so a
+    // drag-to-zoom mid-render hands the GPU over promptly instead of finishing
+    // a now-stale frame.
+    if (shouldContinue && !shouldContinue()) return null;
+    var rows = Math.min(bandRows, height - rowOffset);
+    writeMandelbrotGPUParams(gpu, width, height, dx, dy, sampleCount, steps, rowOffset, passIndex);
+
+    var encoder = d.createCommandEncoder();
+    var pass = encoder.beginComputePass();
+    pass.setPipeline(gpu.pipeline);
+    pass.setBindGroup(0, gpu.bindGroup);
+    pass.dispatchWorkgroups(
+      Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
+      Math.ceil(rows / MANDEL_GPU_WORKGROUP_Y)
+    );
+    pass.end();
+    d.queue.submit([encoder.finish()]);
+
+    var bandStart = (new Date).getTime();
+    await d.queue.onSubmittedWorkDone();
+    bandRows = nextMandelbrotBandRows(bandRows, rows, (new Date).getTime() - bandStart);
+    rowOffset += rows;
+
+    if (onProgress && rowOffset < height && (new Date).getTime() - lastProgress >= MANDEL_GPU_PROGRESS_MS) {
+      lastProgress = (new Date).getTime();
+      var partial = await readbackMandelbrotRows(gpu, width, rowOffset);
+      onProgress({ pixels: partial, rows: rowOffset });
+    }
+
+    // Yield briefly between bands so the GPU isn't locked up for the whole render.
+    if (rowOffset < height) await mandelGPUSleep(MANDEL_GPU_BAND_SLEEP_MS);
+  }
+
+  var copyEncoder = d.createCommandEncoder();
+  copyEncoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([copyEncoder.finish()]);
   await d.queue.onSubmittedWorkDone();
   await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
 
   var range = gpu.readBuf.getMappedRange(0, outputBytes);
   return {
     pixels: new Float32Array(range),
-    samples: sampleCount,
     release: function () {
       try { gpu.readBuf.unmap(); } catch (e) { }
     },
@@ -616,7 +704,7 @@ async function initMandelbrotPerturbGPU(resultCount, orbitCount) {
   }
 }
 
-function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount, steps, refLen) {
+function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount, steps, refLen, rowOffset, passIndex) {
   var u = new Uint32Array(gpu.paramsBytes);
   var f = new Float32Array(gpu.paramsBytes);
   u[0] = width >>> 0;
@@ -647,14 +735,17 @@ function writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, sampleCount
   f[14] = orbitRealPoint;
   f[15] = orbitImgPoint;
   f[16] = mandelGlitchTolerance;
-  f[17] = 0.0;
-  f[18] = 0.0;
+  u[17] = (rowOffset || 0) >>> 0;
+  u[18] = (passIndex || 0) >>> 0;
   f[19] = 0.0;
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
-async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, steps) {
-  var resultCount = width * height * samples;
+// Perturbation counterpart of calcMandelbrotPixelsGPU: one sample per pixel
+// for the given `passIndex`, with `samples` carrying the total pass count for
+// the jitter decision.  Passes are blended on the CPU side.
+async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, steps, passIndex, onProgress, shouldContinue) {
+  var resultCount = width * height;
   var fix = ensureLookAtFix();
   var ref = getReferenceOrbit(fix[0], fix[1], steps ?? 20, escapeRadius);
   var orbitCount = ref.length;
@@ -664,28 +755,56 @@ async function calcMandelbrotPerturbPixelsGPU(width, height, dx, dy, samples, st
   if (!gpu) return null;
 
   gpu.device.queue.writeBuffer(gpu.orbitBuf, 0, ref.orbit.buffer, ref.orbit.byteOffset, orbitCount * 8);
-  writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, samples, steps, orbitCount);
 
   var outputBytes = resultCount * 4 * 4;
   var d = gpu.device;
-  var encoder = d.createCommandEncoder();
-  var pass = encoder.beginComputePass();
-  pass.setPipeline(gpu.pipeline);
-  pass.setBindGroup(0, gpu.bindGroup);
-  pass.dispatchWorkgroups(
-    Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
-    Math.ceil((height * samples) / MANDEL_GPU_WORKGROUP_Y)
-  );
-  pass.end();
-  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
-  d.queue.submit([encoder.finish()]);
+
+  // Same horizontal-band strategy as the direct path: keep each GPU
+  // submission short enough to dodge the OS watchdog (TDR) at deep zooms /
+  // high iteration counts, then read the shared output buffer back once.
+  var bandRows = MANDEL_GPU_INITIAL_BAND_ROWS;
+  var lastProgress = (new Date).getTime();
+  for (var rowOffset = 0; rowOffset < height;) {
+    // Bail between bands once a newer render has superseded this one.
+    if (shouldContinue && !shouldContinue()) return null;
+    var rows = Math.min(bandRows, height - rowOffset);
+    writeMandelbrotPerturbGPUParams(gpu, width, height, dx, dy, samples, steps, orbitCount, rowOffset, passIndex);
+
+    var encoder = d.createCommandEncoder();
+    var pass = encoder.beginComputePass();
+    pass.setPipeline(gpu.pipeline);
+    pass.setBindGroup(0, gpu.bindGroup);
+    pass.dispatchWorkgroups(
+      Math.ceil(width / MANDEL_GPU_WORKGROUP_X),
+      Math.ceil(rows / MANDEL_GPU_WORKGROUP_Y)
+    );
+    pass.end();
+    d.queue.submit([encoder.finish()]);
+
+    var bandStart = (new Date).getTime();
+    await d.queue.onSubmittedWorkDone();
+    bandRows = nextMandelbrotBandRows(bandRows, rows, (new Date).getTime() - bandStart);
+    rowOffset += rows;
+
+    if (onProgress && rowOffset < height && (new Date).getTime() - lastProgress >= MANDEL_GPU_PROGRESS_MS) {
+      lastProgress = (new Date).getTime();
+      var partial = await readbackMandelbrotRows(gpu, width, rowOffset);
+      onProgress({ pixels: partial, rows: rowOffset });
+    }
+
+    // Yield briefly between bands so the GPU isn't locked up for the whole render.
+    if (rowOffset < height) await mandelGPUSleep(MANDEL_GPU_BAND_SLEEP_MS);
+  }
+
+  var copyEncoder = d.createCommandEncoder();
+  copyEncoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+  d.queue.submit([copyEncoder.finish()]);
   await d.queue.onSubmittedWorkDone();
   await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
 
   var range = gpu.readBuf.getMappedRange(0, outputBytes);
   return {
     pixels: new Float32Array(range),
-    samples: samples,
     refEscaped: ref.escaped,
     refLength: ref.length,
     release: function () {
@@ -845,7 +964,7 @@ function draw(pickColor, superSamples) {
   xRange = [lookAt[0] - zoomX / 2, lookAt[0] + zoomX / 2];
   yRange = [lookAt[1] - zoomY / 2, lookAt[1] + zoomY / 2];
 
-  var steps = Math.min(100000, parseInt($('steps').value));
+  var steps = Math.min(1000000, parseInt($('steps').value));
   if ($('autoIterations').checked) {
     var f = Math.sqrt(
       0.001 + 4.0 * Math.min(
@@ -990,80 +1109,123 @@ function draw(pickColor, superSamples) {
       return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
     }
 
-    function paintGPUBatch(batch) {
-      if (!renderIsCurrent()) return true;
+    // The GPU now returns exactly one sample per pixel; anti-aliasing is built
+    // up by blending several jittered passes here on the CPU.  `accum` holds
+    // the running RGB sum and `passesDone` how many passes are folded in, so
+    // the painted frame is always the current average.
+    var pixelCount = canvas.width * canvas.height;
+    var accum = new Float32Array(pixelCount * 3);
+    var passesDone = 0;
 
+    function gpuPixelColor(pixels, idx) {
+      var poff = idx * 4;
+      var Tr = pixels[poff + 1];
+      var Ti = pixels[poff + 2];
+      var dist = pixels[poff + 3];
+      // GPU overflow can produce NaN/Infinity; treat those samples as interior.
+      if (!isFinite(Tr) || !isFinite(Ti) || !isFinite(dist)) return interiorColor;
+      return pickColor(steps, Math.round(pixels[poff]), Tr, Ti, dist);
+    }
+
+    function foldPass(pixels) {
+      for (var idx = 0; idx < pixelCount; idx++) {
+        var color = gpuPixelColor(pixels, idx);
+        var o = idx * 3;
+        accum[o] += color[0];
+        accum[o + 1] += color[1];
+        accum[o + 2] += color[2];
+      }
+      passesDone++;
+    }
+
+    function paintAccum() {
+      if (!renderIsCurrent()) return;
       var gpuImg = ctx.createImageData(canvas.width, canvas.height);
       var data = gpuImg.data;
-      var pixels = batch.pixels;
-      var sampleCount = batch.samples;
+      var inv = 1 / passesDone;
+      for (var idx = 0; idx < pixelCount; idx++) {
+        var o = idx * 3;
+        var outOff = idx * 4;
+        data[outOff] = accum[o] * inv;
+        data[outOff + 1] = accum[o + 1] * inv;
+        data[outOff + 2] = accum[o + 2] * inv;
+        data[outOff + 3] = 255;
+      }
+      ctx.putImageData(gpuImg, 0, 0);
+    }
 
-      for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
-        var colorSum = [0, 0, 0, 255];
-
-        for (var s = 0; s < sampleCount; s++) {
-          var poff = (idx * sampleCount + s) * 4;
-          var n = Math.round(pixels[poff]);
-          var Tr = pixels[poff + 1];
-          var Ti = pixels[poff + 2];
-          var dist = pixels[poff + 3];
-
-          if (!isFinite(Tr) || !isFinite(Ti) || !isFinite(dist)) {
-            // GPU overflow can produce NaN/Infinity; treat those samples as interior.
-            colorSum = addRGB(colorSum, interiorColor);
-            continue;
-          }
-
-          colorSum = addRGB(colorSum, pickColor(steps, n, Tr, Ti, dist));
-        }
-
-        var color = divRGB(colorSum, sampleCount);
+    // Progressive feedback during the first (still un-blended) pass.  The
+    // top-down band order means the computed rows are always the first ones,
+    // so a row-tall ImageData drawn at (0,0) lands correctly.
+    function paintRawPartial(pixels, rowCount) {
+      if (!renderIsCurrent()) return;
+      var gpuImg = ctx.createImageData(canvas.width, rowCount);
+      var data = gpuImg.data;
+      var count = canvas.width * rowCount;
+      for (var idx = 0; idx < count; idx++) {
+        var color = gpuPixelColor(pixels, idx);
         var outOff = idx * 4;
         data[outOff] = color[0];
         data[outOff + 1] = color[1];
         data[outOff + 2] = color[2];
         data[outOff + 3] = 255;
       }
-
-      if (!renderIsCurrent()) return true;
       ctx.putImageData(gpuImg, 0, 0);
-      return true;
+    }
+
+    function onGPUProgress(partial) {
+      // Later passes already show a full averaged frame; only pass 0 needs it.
+      if (passesDone === 0) paintRawPartial(partial.pixels, partial.rows);
     }
 
     try {
-      var batch = null;
+      var passCount = Math.max(1, superSamples);
       var usePerturb = zoom < MANDEL_PERTURB_ZOOM_THRESHOLD;
-      try {
-        if (usePerturb) {
-          batch = await calcMandelbrotPerturbPixelsGPU(canvas.width, canvas.height, dx, dy, superSamples, steps);
+
+      for (var pass = 0; pass < passCount; pass++) {
+        if (!renderIsCurrent()) return true;
+
+        var batch = null;
+        try {
+          if (usePerturb) {
+            batch = await calcMandelbrotPerturbPixelsGPU(canvas.width, canvas.height, dx, dy, passCount, steps, pass, onGPUProgress, renderIsCurrent);
+            // A null here means either the perturb path is unavailable or this
+            // render was superseded mid-band.  Only retry on the direct path in
+            // the former case; a supersede is handled below.
+            if (!batch && renderIsCurrent()) usePerturb = false;
+          }
+          if (!batch && renderIsCurrent()) {
+            batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, passCount, steps, pass, onGPUProgress, renderIsCurrent);
+          }
+        } catch (e) {
+          console.warn('Mandelbrot WebGPU render failed; falling back to CPU.', e);
+          mandelGPUDisabled = true;
+          mandelGPUStatus = 'CPU fallback';
+          destroyMandelbrotGPU();
+          destroyMandelbrotPerturbGPU();
+          return false;
         }
-        if (!batch) {
-          batch = await calcMandelbrotPixelsGPU(canvas.width, canvas.height, dx, dy, superSamples, steps);
-          usePerturb = false;
+
+        // A newer render has taken over: leave the GPU to it rather than
+        // dropping to the CPU path.
+        if (!renderIsCurrent()) return true;
+        if (!batch) return false;
+        try {
+          foldPass(batch.pixels);
+        } finally {
+          batch.release();
         }
-      } catch (e) {
-        console.warn('Mandelbrot WebGPU render failed; falling back to CPU.', e);
-        mandelGPUDisabled = true;
-        mandelGPUStatus = 'CPU fallback';
-        destroyMandelbrotGPU();
-        destroyMandelbrotPerturbGPU();
-        return false;
+
+        if (!renderIsCurrent()) return true;
+        paintAccum();
+
+        var elapsedMS = Math.max(1, (new Date).getTime() - start);
+        mandelGPUStatus = usePerturb ? 'GPU perturb' : 'GPU';
+        $('renderTime').innerHTML = (elapsedMS / 1000.0).toFixed(1);
+        $('renderSpeed').innerHTML = metric_units(Math.floor((pixelCount * passesDone) / elapsedMS));
+        $('renderSpeedUnit').innerHTML = 'sec (' + mandelGPUStatus + ' ' + passesDone + '/' + passCount + ')';
       }
 
-      if (!batch) return false;
-      try {
-        if (!paintGPUBatch(batch)) return false;
-      } finally {
-        batch.release();
-      }
-
-      if (!renderIsCurrent()) return true;
-
-      var elapsedMS = Math.max(1, (new Date).getTime() - start);
-      mandelGPUStatus = usePerturb ? 'GPU perturb' : 'GPU';
-      $('renderTime').innerHTML = (elapsedMS / 1000.0).toFixed(1);
-      $('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
-      $('renderSpeedUnit').innerHTML = 'sec (' + mandelGPUStatus + ')';
       return true;
     } finally {
       mandelGPUInFlight = false;
@@ -1072,10 +1234,21 @@ function draw(pickColor, superSamples) {
 
   if (!mandelGPUDisabled && isMandelbrotWebGPUSupported()) {
     var fallbackRenderId = renderId;
-    renderGPU().then(function (usedGPU) {
+    // Serialise onto any in-flight GPU render instead of returning early to the
+    // CPU path: the running render bails quickly once it sees renderId change,
+    // after which this frame starts on the GPU.  This keeps drag-to-zoom on the
+    // GPU rather than dropping to the slower CPU renderer.  The .catch keeps the
+    // chain alive if a prior render rejected unexpectedly.
+    var previous = (mandelGPURenderPromise || Promise.resolve()).catch(function () { });
+    mandelGPURenderPromise = previous.then(function () {
+      // A newer draw may have superseded us while we waited our turn.
+      if (renderId != fallbackRenderId) return true;
+      return renderGPU();
+    }).then(function (usedGPU) {
       if (!usedGPU && renderId == fallbackRenderId) {
         render();
       }
+      return usedGPU;
     });
   } else {
     render();
