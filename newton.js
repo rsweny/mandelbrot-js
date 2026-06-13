@@ -267,7 +267,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (P.secant != 0u) {
     // Secant needs two seeds; nudge the second by 0.1 like the CPU path.
     var prev = seed;
-    var z = seed + vec2<f32>(0.1, 0.0);
+    var z = seed + vec2<f32>(0.1, 0.0); // vec2<f32>(0.0, 0.0);
     var old = prev;
     var fPrev = equationGpu(prev, seed);
     var fz = equationGpu(z, seed);
@@ -292,7 +292,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Reject stalls at non-root stationary points (small step but |f(z)| still
     // large) by flagging them as interior so they don't become bogus roots.
-    if (length(fz) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
+    // Skipped under the Mandelbrot variant, where convergence is not to a root.
+    if (P.mandelbrotAddition == 0u && length(fz) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
     outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
     return;
   }
@@ -314,6 +315,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     n = n + 1u;
   }
 
+  // Same residual guard as the secant path: f/f' can stall below rootBoundry
+  // where f' is large without being at a root.  newtonStepGpu never exposes
+  // f(z) on its own, so evaluate it once here.  Skipped under Mandelbrot.
+  if (P.mandelbrotAddition == 0u && length(equationGpu(z, seed)) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
   outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
 }
 `;
@@ -488,8 +493,13 @@ function iterateNewtonEquation(i, j, equation, derivative)
 		hue += Math.pow(1.05, -w);
 	}
 	
+	// f/f' can shrink below rootBoundry where f' is large, not just at a root,
+	// so the complicated equations stall at non-roots the same way the secant
+	// method does.  Reject those by the residual |f(z)|.  Skipped under the
+	// Mandelbrot variant, where the +c term means convergence is to a fixed
+	// point of the map rather than a root of f (so |f(z)| is not near zero).
 	var vals = new Array();
-	if (n != iterations) 
+	if (n != iterations && (mandelbrotAddition || distance(equation(z,i,j), zero) < rootResidual))
 	{
 		vals[0] = hue;
 		//console.log(iterations + " " + n + " new root at " + i + " " + j + " " + distance(old,z));
@@ -497,10 +507,10 @@ function iterateNewtonEquation(i, j, equation, derivative)
 	}
 	else
 	{
-		vals[0] = n;
+		vals[0] = iterations;
 		vals[1] = 0;
 	}
-	
+
 	vals[2] = z.re;
 	vals[3] = z.i;
 
@@ -548,8 +558,11 @@ function iterateSecantEquation(i, j, equation)
 		hue += Math.pow(1.05, -w);
 	}
 
+	// Reject stalls at non-root stationary points by the residual |f(z)| (see
+	// iterateNewtonEquation).  Skipped under the Mandelbrot variant, where the
+	// +c term means convergence is not to a root of f.
 	var vals = new Array();
-	if (n != iterations && distance(fz, zero) < rootResidual)
+	if (n != iterations && (mandelbrotAddition || distance(fz, zero) < rootResidual))
 	{
 		vals[0] = hue;
 		vals[1] = addRoot(z);
@@ -847,6 +860,8 @@ function draw(superSamples)
 		if (iter0 == iterations) {
 			if (mandelbrotAddition || mode == 3) {
 				return [0,0,0,255];
+			} else if (secantMethod) {
+				return secantInteriorColor(finalRe, finalIm);
 			} else {
 				return [255,255,255,255];
 			}
@@ -984,7 +999,8 @@ function draw(superSamples)
 				return [255, 255, 255, 255];
 			}
 			if (n == iterationLimit) {
-				return (mandelbrotAddition || mode == 3) ? [0, 0, 0, 255] : [255, 255, 255, 255];
+				if (mandelbrotAddition || mode == 3) return [0, 0, 0, 255];
+				return secantInteriorColor(zre, zim);
 			}
 			var rootIndex = addRoot({re: zre, i: zim});
 			return pickColorValues(hue, rootIndex, zre, zim);
@@ -1240,6 +1256,19 @@ function divRGB(v, div)
 	v[2] /= div;
 	v[3] /= div;
 	return v;
+}
+
+// Shade the secant fractal's non-convergent interior (otherwise flat white) by
+// the final orbit magnitude: settled near-origin points stay near white, far
+// wandering orbits fade toward grey.  Used by both the CPU and GPU colour paths.
+function secantInteriorColor(zre, zim)
+{
+	if (brightness > 5) return [255, 255, 255, 255];
+
+	var m = Math.sqrt(zre*zre + zim*zim);
+	var t = m / (1.0 + m); // compress [0, inf) into [0, 1)
+	var g = Math.round(255 * (1.0 - (0.4/brightness) * Math.sqrt(t)));
+	return [g, g, g, 255];
 }
 
 
