@@ -61,7 +61,7 @@ struct Params {
   mandelbrotAddition: u32,
   samples: u32,
   passIndex: u32,
-  _pad: u32,
+  secant: u32,
   xStart: f32,
   yStart: f32,
   dx: f32,
@@ -80,6 +80,8 @@ const NEWTON_EXP_LIMIT: f32 = 42.0;
 const NEWTON_VALUE_LIMIT: f32 = 1.0e18;
 const NEWTON_STEP_LIMIT: f32 = 1.0e12;
 const NEWTON_MIN_DENOM: f32 = 1.0e-30;
+// Mirrors rootResidual on the CPU: max |f(z)| accepted as a genuine root.
+const NEWTON_ROOT_RESIDUAL: f32 = 0.1;
 
 fn finiteVec(v: vec2<f32>) -> bool {
   return all(v == v) && all(abs(v) <= vec2<f32>(NEWTON_VALUE_LIMIT));
@@ -196,6 +198,55 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
   }
 }
 
+// Evaluate f(z) on its own for the secant method.  newtonStepGpu folds f and
+// f' into a single correction, so the secant path (which never uses f') needs
+// the bare function value.  Each case mirrors the matching CPU equation.
+fn equationGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
+  let expo = vec2<f32>(P.order, P.imgOrder);
+  let one = vec2<f32>(1.0, 0.0);
+  let two = vec2<f32>(2.0, 0.0);
+  let three = vec2<f32>(3.0, 0.0);
+  let pointOne = vec2<f32>(0.1, 0.0);
+
+  switch (P.mode) {
+    case 0u: {
+      return csub(cpow(z, expo), one);
+    }
+    case 1u: {
+      return csub(cpow(z, expo), cdiv(one, z));
+    }
+    case 2u: {
+      let ten = vec2<f32>(10.0, 0.0);
+      let p2i = vec2<f32>(0.0, 0.2);
+      return csub(cadd(cpow(z, ten), cmul(p2i, cpow(z, expo))), one);
+    }
+    case 3u: {
+      return cadd(csub(cmul(two, cpow(z, expo)), seed), one);
+    }
+    case 4u: {
+      let c = vec2<f32>(1.0 + P.order, P.imgOrder);
+      return cadd(csub(cpow(z, c), z), pointOne);
+    }
+    case 5u: {
+      let five = vec2<f32>(5.0, 0.0);
+      let six = vec2<f32>(6.0, 0.0);
+      return cadd(csub(cadd(csub(cpow(z, expo), cmul(three, cpow(z, five))), cmul(six, cpow(z, three))), cmul(three, z)), three);
+    }
+    default: {
+      let con = vec2<f32>(P.order, P.imgOrder);
+      return csub(cpow(z, z), cmul(con, z));
+    }
+  }
+}
+
+// One secant step: z - f(z) * (z - prev) / (f(z) - f(prev)).  Reuses the
+// Newton step's clamping/finiteness guards so f32 overflow can't poison the
+// iteration.
+fn secantStepGpu(z: vec2<f32>, prev: vec2<f32>, fz: vec2<f32>, fPrev: vec2<f32>) -> vec2<f32> {
+  let correction = cdiv(cmul(fz, csub(z, prev)), csub(fz, fPrev));
+  return applyNewtonStep(z, correction);
+}
+
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	if (gid.x >= P.width || gid.y >= P.height) { return; }
@@ -211,9 +262,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	}
 
   var n = 0u;
+  var hue = 0.0;
+
+  if (P.secant != 0u) {
+    // Secant needs two seeds; nudge the second by 0.1 like the CPU path.
+    var prev = seed;
+    var z = seed + vec2<f32>(0.1, 0.0);
+    var old = prev;
+    var fPrev = equationGpu(prev, seed);
+    var fz = equationGpu(z, seed);
+
+    loop {
+      if (n >= P.iterations) { break; }
+      if (!(distance(old, z) > P.rootBoundary)) { break; }
+      old = z;
+      z = secantStepGpu(z, prev, fz, fPrev);
+      if (P.mandelbrotAddition != 0u) {
+        z = z + seed * 0.5;
+      }
+      // slide the two-point window forward for the next finite difference
+      prev = old;
+      fPrev = fz;
+      fz = equationGpu(z, seed);
+      let delta = length(z - old);
+      let w = 1.0 / delta;
+      hue = hue + pow(1.05, -w);
+      n = n + 1u;
+    }
+
+    // Reject stalls at non-root stationary points (small step but |f(z)| still
+    // large) by flagging them as interior so they don't become bogus roots.
+    if (length(fz) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
+    outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
+    return;
+  }
+
   var old = seed;
   var z = newtonStepGpu(seed, seed);
-  var hue = 0.0;
 
   loop {
     if (n >= P.iterations) { break; }
@@ -309,7 +394,7 @@ function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount, passIndex
   u[4] = mandelbrotAddition ? 1 : 0;
   u[5] = sampleCount >>> 0;
   u[6] = (passIndex || 0) >>> 0;
-  u[7] = 0;
+  u[7] = secantMethod ? 1 : 0;
   f[8] = xRange[0];
   f[9] = yRange[0];
   f[10] = dx;
@@ -418,12 +503,80 @@ function iterateNewtonEquation(i, j, equation, derivative)
 	
 	vals[2] = z.re;
 	vals[3] = z.i;
-	
+
+	return vals;
+}
+
+/*
+ * Secant method variation.  Like Newton's method but the derivative is
+ * approximated from the previous two iterates, so it never evaluates the
+ * analytic derivative:
+ *
+ *   z_{n+1} = z_n - f(z_n) * (z_n - z_{n-1}) / (f(z_n) - f(z_{n-1}))
+ *
+ * It needs two seeds, so the second one is the pixel coordinate nudged by a
+ * small offset to give the first finite difference a defined slope.  Returns
+ * the same [hue/n, rootIndex, re, im] tuple as iterateNewtonEquation so the
+ * colour mapping is unchanged.
+ */
+function iterateSecantEquation(i, j, equation)
+{
+	var n = 0;
+	var prev = new Complex(i, j);
+	var z = prev.add(pointone);
+	var old = prev;
+
+	var fPrev = equation(prev, i, j);
+	var fz = equation(z, i, j);
+
+	var hue = 0.0;
+	var w = 0.0;
+	while (n < iterations && distance(old, z) > rootBoundry)
+	{
+		old = z;
+		z = z.sub( fz.mult(z.sub(prev)).div(fz.sub(fPrev)) );
+		if (mandelbrotAddition) z = z.add(Complex(i/2.0, j/2.0));
+
+		// slide the two-point window forward for the next finite difference
+		prev = old;
+		fPrev = fz;
+		fz = equation(z, i, j);
+		n++;
+
+		// normal smoothing
+		w = 1.0 / distance(z.sub(old), zero);
+		hue += Math.pow(1.05, -w);
+	}
+
+	var vals = new Array();
+	if (n != iterations && distance(fz, zero) < rootResidual)
+	{
+		vals[0] = hue;
+		vals[1] = addRoot(z);
+	}
+	else
+	{
+		// Either the iteration ran out, or it stalled at a non-root stationary
+		// point.  Flag it as interior so it never registers as a bogus root.
+		vals[0] = iterations;
+		vals[1] = 0;
+	}
+
+	vals[2] = z.re;
+	vals[3] = z.i;
+
 	return vals;
 }
 
 var mandelbrotAddition = false;
+var secantMethod = false;
 var rootBoundry = 0.0001;
+// Max |f(z)| still accepted as a genuine root.  The secant step can shrink
+// below rootBoundry at near-origin stationary points where |f(z)| is still
+// ~1, so without this guard those stuck points register as bogus roots.  A
+// true root has |f(z)| ~ rootBoundry * |f'(root)| (<= ~1e-2 here), far below
+// this threshold.  Mirrored by NEWTON_ROOT_RESIDUAL in the GPU shader.
+var rootResidual = 0.1;
 var roots = [];
 
 /* Newton functions */
@@ -615,6 +768,13 @@ function draw(superSamples)
 	yRange = [lookAt[1]-zoom[1]/2, lookAt[1]+zoom[1]/2];
 
 	mandelbrotAddition = $("mandelbrot").checked;
+	secantMethod = $("secant").checked;
+
+	// Secant iterates from the equation alone (the derivative is approximated),
+	// so a derivative is only needed for the classic Newton path.
+	var iterate = secantMethod
+		? function(cr, ci) { return iterateSecantEquation(cr, ci, equation); }
+		: function(cr, ci) { return iterateNewtonEquation(cr, ci, equation, derivative); };
 
 	initialColor = $("colorSlider").value / 100.0;
 	contrast = $("contrastSlider").value / 100.0;
@@ -652,7 +812,7 @@ function draw(superSamples)
 			for (let s = 0; s < superSamples; ++s) {
 				let rx = Math.random()*Cr_step;
 				let ry = Math.random()*Ci_step;
-				let p = iterateNewtonEquation(Cr - rx/2, Ci - ry/2, equation, derivative);
+				let p = iterate(Cr - rx/2, Ci - ry/2);
 				color = addRGB(color, pickColor(p));
 			}
 
@@ -668,7 +828,7 @@ function draw(superSamples)
 	function drawLine(Ci, off, Cr_init, Cr_step) {
 		let Cr = Cr_init;
 		for (let x = 0; x < canvas.width; ++x, Cr += Cr_step) {
-			let p = iterateNewtonEquation(Cr, Ci, equation, derivative);
+			let p = iterate(Cr, Ci);
 			let color = pickColor(p);
 			img.data[off++] = color[0];
 			img.data[off++] = color[1];
@@ -957,6 +1117,7 @@ function updateHashTag(samples) {
 		'&realExponent=' + encodeURIComponent($('real_exponent').value) +
 		'&complexExponent=' + encodeURIComponent($('complex_exponent').value) +
 		'&mandelbrot=' + ($('mandelbrot').checked ? '1' : '0') +
+		'&secant=' + ($('secant').checked ? '1' : '0') +
 		'&mode=' + scheme;
 	lastWrittenHash = h;
 	location.hash = h;
@@ -1011,6 +1172,11 @@ function readHashTag()
 
 			case 'mandelbrot': {
 				$('mandelbrot').checked = val === '1' || val === 'true';
+				redraw = true;
+			} break;
+
+			case 'secant': {
+				$('secant').checked = val === '1' || val === 'true';
 				redraw = true;
 			} break;
 
@@ -1118,6 +1284,10 @@ function main()
 	}
 
 	$("mandelbrot").onchange = function() {
+		draw(getSamples());
+	}
+
+	$("secant").onchange = function() {
 		draw(getSamples());
 	}
 
