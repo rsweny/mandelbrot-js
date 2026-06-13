@@ -60,8 +60,8 @@ struct Params {
   mode: u32,
   mandelbrotAddition: u32,
   samples: u32,
-  _pad1: u32,
-  _pad2: u32,
+  passIndex: u32,
+  _pad: u32,
   xStart: f32,
   yStart: f32,
   dx: f32,
@@ -198,19 +198,16 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-	if (gid.x >= P.width || gid.y >= P.height * P.samples) { return; }
+	if (gid.x >= P.width || gid.y >= P.height) { return; }
 
 	let x = gid.x;
-	let sampleY = gid.y;
-	let y = sampleY / P.samples;
-	let sampleIdx = sampleY - y * P.samples;
+	let y = gid.y;
 	let pixelIdx = y * P.width + x;
-	let idx = pixelIdx * P.samples + sampleIdx;
 	var seed = vec2<f32>(P.xStart + f32(x) * P.dx, P.yStart + f32(y) * P.dy);
 	if (P.samples > 1u) {
-	let sx = hash01(pixelIdx * 1664525u + sampleIdx * 1013904223u + 17u);
-	let sy = hash01(pixelIdx * 22695477u + sampleIdx * 1103515245u + 29u);
-	seed = seed - vec2<f32>(sx * P.dx * 0.5, sy * P.dy * 0.5);
+		let sx = hash01(pixelIdx * 1664525u + P.passIndex * 1013904223u + 17u);
+		let sy = hash01(pixelIdx * 22695477u + P.passIndex * 1103515245u + 29u);
+		seed = seed - vec2<f32>(sx * P.dx * 0.5, sy * P.dy * 0.5);
 	}
 
   var n = 0u;
@@ -232,7 +229,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     n = n + 1u;
   }
 
-  outPixels[idx] = vec4<f32>(hue, f32(n), z.x, z.y);
+  outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
 }
 `;
 
@@ -301,7 +298,7 @@ async function initNewtonGPU(resultCount)
   }
 }
 
-function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount)
+function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount, passIndex)
 {
   var u = new Uint32Array(gpu.paramsBytes);
   var f = new Float32Array(gpu.paramsBytes);
@@ -311,7 +308,8 @@ function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount)
   u[3] = mode >>> 0;
   u[4] = mandelbrotAddition ? 1 : 0;
   u[5] = sampleCount >>> 0;
-  u[6] = u[7] = 0;
+  u[6] = (passIndex || 0) >>> 0;
+  u[7] = 0;
   f[8] = xRange[0];
   f[9] = yRange[0];
   f[10] = dx;
@@ -323,38 +321,37 @@ function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount)
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
-async function calcNewtonPixelsGPU(width, height, dx, dy, samples)
+async function calcNewtonPixelsGPU(width, height, dx, dy, samples, passIndex)
 {
 	var sampleCount = Math.max(1, parseInt(samples, 10) || 1);
-	var resultCount = width * height * sampleCount;
+	var resultCount = width * height;
 	var gpu = await initNewtonGPU(resultCount);
- 	if (!gpu) return null;
+	if (!gpu) return null;
 
-	writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount);
+	writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount, passIndex);
 	var outputBytes = resultCount * 4 * 4;
-  var d = gpu.device;
-  var encoder = d.createCommandEncoder();
-  var pass = encoder.beginComputePass();
-  pass.setPipeline(gpu.pipeline);
-  pass.setBindGroup(0, gpu.bindGroup);
-	  pass.dispatchWorkgroups(
-	    Math.ceil(width / NEWTON_GPU_WORKGROUP_X),
-	    Math.ceil((height * sampleCount) / NEWTON_GPU_WORKGROUP_Y)
-	  );
-  pass.end();
-  encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
-  d.queue.submit([encoder.finish()]);
-  await d.queue.onSubmittedWorkDone();
-  await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
+	var d = gpu.device;
+	var encoder = d.createCommandEncoder();
+	var pass = encoder.beginComputePass();
+	pass.setPipeline(gpu.pipeline);
+	pass.setBindGroup(0, gpu.bindGroup);
+	pass.dispatchWorkgroups(
+		Math.ceil(width / NEWTON_GPU_WORKGROUP_X),
+		Math.ceil(height / NEWTON_GPU_WORKGROUP_Y)
+	);
+	pass.end();
+	encoder.copyBufferToBuffer(gpu.outputBuf, 0, gpu.readBuf, 0, outputBytes);
+	d.queue.submit([encoder.finish()]);
+	await d.queue.onSubmittedWorkDone();
+	await gpu.readBuf.mapAsync(GPUMapMode.READ, 0, outputBytes);
 
-  var range = gpu.readBuf.getMappedRange(0, outputBytes);
-  return {
-    pixels: new Float32Array(range),
-	    samples: sampleCount,
-    release: function() {
-      try { gpu.readBuf.unmap(); } catch(e) {}
-    },
-  };
+	var range = gpu.readBuf.getMappedRange(0, outputBytes);
+	return {
+		pixels: new Float32Array(range),
+		release: function() {
+			try { gpu.readBuf.unmap(); } catch(e) {}
+		},
+	};
 }
 
 /*
@@ -381,11 +378,10 @@ function focusOnSubmit()
 }
 
 function getSamples() {
-	// more than 4x anti-alias samples can overload the GPU
-	return  Math.min(4, parseInt($('superSamples').value));
+	return Math.min(8, parseInt($('superSamples').value));
 }
 
-function iterateEquation(i, j, equation, derivative) 
+function iterateNewtonEquation(i, j, equation, derivative) 
 {
 	var n = 0;
 	var z = new Complex(i,j);
@@ -656,7 +652,7 @@ function draw(superSamples)
 			for (let s = 0; s < superSamples; ++s) {
 				let rx = Math.random()*Cr_step;
 				let ry = Math.random()*Ci_step;
-				let p = iterateEquation(Cr - rx/2, Ci - ry/2, equation, derivative);
+				let p = iterateNewtonEquation(Cr - rx/2, Ci - ry/2, equation, derivative);
 				color = addRGB(color, pickColor(p));
 			}
 
@@ -672,7 +668,7 @@ function draw(superSamples)
 	function drawLine(Ci, off, Cr_init, Cr_step) {
 		let Cr = Cr_init;
 		for (let x = 0; x < canvas.width; ++x, Cr += Cr_step) {
-			let p = iterateEquation(Cr, Ci, equation, derivative);
+			let p = iterateNewtonEquation(Cr, Ci, equation, derivative);
 			let color = pickColor(p);
 			img.data[off++] = color[0];
 			img.data[off++] = color[1];
@@ -805,103 +801,95 @@ function draw(superSamples)
 		var startHeight = canvas.height;
 		var startWidth = canvas.width;
 		var ourRenderId = renderId;
-		var requestedSamples = superSamples;
+		var passCount = Math.max(1, superSamples);
 
 		function renderIsCurrent()
 		{
 			return renderId == ourRenderId && startHeight == canvas.height && startWidth == canvas.width;
 		}
 
-		function paintGPUBatch(batch)
-		{
-			if (!renderIsCurrent()) return true;
+		var pixelCount = canvas.width * canvas.height;
+		var accum = new Float32Array(pixelCount * 3);
+		var passesDone = 0;
+		var iterationLimit = parseInt(iterations) || 20;
 
-			var gpuImg = ctx.createImageData(canvas.width, canvas.height);
-			var data = gpuImg.data;
-			var pixels = batch.pixels;
-			var iterationLimit = parseInt(iterations) ?? 20;
-			var sampleCount = batch.samples;
+		function gpuPixelColor(pixels, idx) {
+			var poff = idx * 4;
+			var hue = pixels[poff];
+			var n = Math.round(pixels[poff + 1]);
+			var zre = pixels[poff + 2];
+			var zim = pixels[poff + 3];
 
-			for (var idx = 0; idx < canvas.width * canvas.height; idx++) {
-				var colorSum = [0, 0, 0, 255];
-
-				for (var s = 0; s < sampleCount; s++) {
-					var poff = (idx * sampleCount + s) * 4;
-					var hue = pixels[poff];
-					var n = Math.round(pixels[poff + 1]);
-					var zre = pixels[poff + 2];
-					var zim = pixels[poff + 3];
-					var rootIndex = 0;
-					var iter0 = n;
-
-					if (!isFinite(hue) || !isFinite(n) || !isFinite(zre) || !isFinite(zim)) {
-						// GPU overflow/poles can produce NaN/Infinity; ImageData turns NaN colour channels into black, so treat these as non-converged white samples.
-						colorSum = addRGB(colorSum, [255,255,255,255]);
-						continue;
-					}
-
-					if (n == iterationLimit) {
-						// Match the CPU renderer: samples that hit the iteration limit are interior/non-converged and should be white.
-						if (mandelbrotAddition || mode == 3) {
-							colorSum = addRGB(colorSum, [0,0,0,255]);
-						} else {
-							colorSum = addRGB(colorSum, [255,255,255,255]);
-						}
-						continue;
-					}
-
-					iter0 = hue;
-					rootIndex = addRoot({re: zre, i: zim});
-					colorSum = addRGB(colorSum, pickColorValues(iter0, rootIndex, zre, zim));
-				}
-
-				var color = divRGB(colorSum, sampleCount);
-				var outOff = idx * 4;
-
-				data[outOff] = color[0];
-				data[outOff + 1] = color[1];
-				data[outOff + 2] = color[2];
-				data[outOff + 3] = 255;
+			if (!isFinite(hue) || !isFinite(n) || !isFinite(zre) || !isFinite(zim)) {
+				return [255, 255, 255, 255];
 			}
-
-			if (!renderIsCurrent()) return true;
-			ctx.putImageData(gpuImg, 0, 0);
-			return true;
+			if (n == iterationLimit) {
+				return (mandelbrotAddition || mode == 3) ? [0, 0, 0, 255] : [255, 255, 255, 255];
+			}
+			var rootIndex = addRoot({re: zre, i: zim});
+			return pickColorValues(hue, rootIndex, zre, zim);
 		}
 
-		async function runGPUPass(samplesForPass)
-		{
-			var batch = null;
-			try {
-				batch = await calcNewtonPixelsGPU(canvas.width, canvas.height, dx, dy, samplesForPass);
-			} catch (e) {
-				console.warn('Newton WebGPU render failed; falling back to CPU.', e);
-				newtonGPUDisabled = true;
-				newtonGPUStatus = 'CPU fallback';
-				destroyNewtonGPU();
-				return false;
+		function foldPass(pixels) {
+			for (var idx = 0; idx < pixelCount; idx++) {
+				var color = gpuPixelColor(pixels, idx);
+				var o = idx * 3;
+				accum[o]     += color[0];
+				accum[o + 1] += color[1];
+				accum[o + 2] += color[2];
 			}
+			passesDone++;
+		}
 
-			if (!batch) return false;
-			try {
-				return paintGPUBatch(batch);
-			} finally {
-				batch.release();
+		function paintAccum() {
+			if (!renderIsCurrent()) return;
+			var gpuImg = ctx.createImageData(canvas.width, canvas.height);
+			var data = gpuImg.data;
+			var inv = 1 / passesDone;
+			for (var idx = 0; idx < pixelCount; idx++) {
+				var o = idx * 3;
+				var outOff = idx * 4;
+				data[outOff]     = accum[o]     * inv;
+				data[outOff + 1] = accum[o + 1] * inv;
+				data[outOff + 2] = accum[o + 2] * inv;
+				data[outOff + 3] = 255;
 			}
+			ctx.putImageData(gpuImg, 0, 0);
 		}
 
 		try {
-			// First pass deliberately uses one sample to discover roots quickly.
-			// The second pass keeps those roots and recolours the full image.
-			if (!await runGPUPass(1)) return false;
-			if (!renderIsCurrent()) return true;
-			if (!await runGPUPass(requestedSamples)) return false;
+			for (var pass = 0; pass < passCount; pass++) {
+				if (!renderIsCurrent()) return true;
 
-			var elapsedMS = Math.max(1, (new Date).getTime() - start);
-			$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1);
-			$('renderSpeed').innerHTML = metric_units(Math.floor((canvas.width * canvas.height) / elapsedMS));
-			$('renderSpeedUnit').innerHTML = 'second (GPU)';
-			newtonGPUStatus = 'GPU';
+				var batch = null;
+				try {
+					batch = await calcNewtonPixelsGPU(canvas.width, canvas.height, dx, dy, passCount, pass);
+				} catch (e) {
+					console.warn('Newton WebGPU render failed; falling back to CPU.', e);
+					newtonGPUDisabled = true;
+					newtonGPUStatus = 'CPU fallback';
+					destroyNewtonGPU();
+					return false;
+				}
+
+				if (!batch) return false;
+				if (!renderIsCurrent()) return true;
+				try {
+					foldPass(batch.pixels);
+				} finally {
+					batch.release();
+				}
+
+				if (!renderIsCurrent()) return true;
+				paintAccum();
+
+				var elapsedMS = Math.max(1, (new Date).getTime() - start);
+				$('renderTime').innerHTML = (elapsedMS/1000.0).toFixed(1);
+				$('renderSpeed').innerHTML = metric_units(Math.floor((pixelCount * passesDone) / elapsedMS));
+				$('renderSpeedUnit').innerHTML = 'sec (GPU ' + passesDone + '/' + passCount + ')';
+				newtonGPUStatus = 'GPU';
+			}
+
 			return true;
 		} finally {
 			newtonGPUInFlight = false;
