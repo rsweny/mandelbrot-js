@@ -51,6 +51,10 @@ var newtonGPU = null;
 var newtonGPUDisabled = false;
 var newtonGPUStatus = 'CPU';
 var newtonGPUInFlight = false;
+// Set when draw() is invoked while a GPU render is still running; the in-flight
+// render redraws the latest parameters once it unwinds (see renderGPU) instead
+// of the dispatcher falling back to the CPU.
+var newtonGPURerender = false;
 
 var NEWTON_PIXEL_WGSL = `
 struct Params {
@@ -267,7 +271,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (P.secant != 0u) {
     // Secant needs two seeds; nudge the second by 0.1 like the CPU path.
     var prev = seed;
-    var z = seed + vec2<f32>(0.1, 0.0); // vec2<f32>(0.0, 0.0);
+    var z = seed * vec2<f32>(1.01, 1.01); // vec2<f32>(0.0, 0.0);
     var old = prev;
     var fPrev = equationGpu(prev, seed);
     var fz = equationGpu(z, seed);
@@ -969,7 +973,14 @@ function draw(superSamples)
 
 	async function renderGPU()
 	{
-		if (newtonGPUInFlight) return false;
+		if (newtonGPUInFlight) {
+			// A GPU pass is already running on the shared buffers.  Don't fall back
+			// to the CPU; instead ask the in-flight pass to redraw the latest
+			// parameters once it unwinds.  Returning true keeps the dispatcher off
+			// the CPU path.
+			newtonGPURerender = true;
+			return true;
+		}
 		newtonGPUInFlight = true;
 
 		var start = (new Date).getTime();
@@ -1049,8 +1060,12 @@ function draw(superSamples)
 				}
 
 				if (!batch) return false;
-				if (!renderIsCurrent()) return true;
+				// calcNewtonPixelsGPU leaves readBuf mapped; it must be released even
+				// if we bail out here because a newer render superseded us — otherwise
+				// the next render's mapAsync throws "already mapped" and disables the
+				// GPU.  Keep the supersede check inside the try so finally still runs.
 				try {
+					if (!renderIsCurrent()) return true;
 					foldPass(batch.pixels);
 				} finally {
 					batch.release();
@@ -1069,6 +1084,13 @@ function draw(superSamples)
 			return true;
 		} finally {
 			newtonGPUInFlight = false;
+			if (newtonGPURerender) {
+				// A draw() arrived mid-render; render the latest UI state now that
+				// the shared buffers are free.  draw() re-reads every parameter, so
+				// one redraw coalesces any number of clicks that happened meanwhile.
+				newtonGPURerender = false;
+				draw(getSamples());
+			}
 		}
 	}
 
@@ -1260,7 +1282,7 @@ function divRGB(v, div)
 
 // Shade the secant fractal's non-convergent interior (otherwise flat white) by
 // the final orbit magnitude: settled near-origin points stay near white, far
-// wandering orbits fade toward grey.  Used by both the CPU and GPU colour paths.
+// wandering orbits fade toward grey.
 function secantInteriorColor(zre, zim)
 {
 	if (brightness > 5) return [255, 255, 255, 255];
@@ -1349,7 +1371,7 @@ function main()
 				desc.style.display = (desc.style.display === 'none') ? 'block' : 'none';
 				return;
 			}
-			if ( box == null ) box = [e.clientX, e.clientY, 0, 0];
+			if ( box == null ) box = [e.clientX, e.clientY, e.clientX, e.clientY];
 		}
 
 		$('canvasControls').onmousemove = function(e)
@@ -1407,6 +1429,15 @@ function main()
 				 */
 				var c = ccanvas.getContext('2d');
 				c.clearRect(0, 0, ccanvas.width, ccanvas.height);
+
+				/*
+				 * A plain click (no meaningful drag) must not zoom — only an
+				 * actual drag-selected box should.
+				 */
+				if ( Math.abs(box[0] - box[2]) < 5 && Math.abs(box[1] - box[3]) < 5 ) {
+					box = null;
+					return;
+				}
 
 				/*
 				 * Calculate new rectangle to render
