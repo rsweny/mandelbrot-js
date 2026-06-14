@@ -32,6 +32,12 @@ var oneError = Complex(1,complex_error);
 var order = 3;
 var img_order = 0;
 
+// Newton/secant relaxation factor a: z <- z - damp * f/f'.  (1, 0) is the
+// classic method; other complex values give relaxed/over-relaxed variations.
+var damp_re = 1;
+var damp_im = 0;
+var dampC = Complex(1, 0);
+
 var zoomStart = 3.4;
 var zoom = [zoomStart, zoomStart];
 var lookAtDefault = [-0.6, 0];
@@ -62,7 +68,7 @@ struct Params {
   height: u32,
   iterations: u32,
   mode: u32,
-  mandelbrotAddition: u32,
+  mandelbrotAddition: f32,
   samples: u32,
   passIndex: u32,
   secant: u32,
@@ -74,6 +80,10 @@ struct Params {
   imgOrder: f32,
   complexError: f32,
   rootBoundary: f32,
+  dampRe: f32,
+  dampIm: f32,
+  _pad0: f32,
+  _pad1: f32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -120,7 +130,8 @@ fn cpow(z: vec2<f32>, w: vec2<f32>) -> vec2<f32> {
 }
 
 fn applyNewtonStep(z: vec2<f32>, correction: vec2<f32>) -> vec2<f32> {
-  let next = z - clampVec(correction, NEWTON_STEP_LIMIT);
+  let damp = vec2<f32>(P.dampRe, P.dampIm);
+  let next = z - clampVec(cmul(damp,correction), NEWTON_STEP_LIMIT);
   if (!finiteVec(next)) { return clampVec(z, NEWTON_VALUE_LIMIT); }
   return next;
 }
@@ -143,9 +154,9 @@ fn newtonStepGpu(z: vec2<f32>, seed: vec2<f32>) -> vec2<f32> {
 
   switch (P.mode) {
     case 0u: {
-	      let scale = cpow(z, csub(oneError, expo));
-	      let correction = cdiv(csub(cpow(z, oneError), scale), expo);
-	      return applyNewtonStep(z, correction);
+		  let f = csub(cpow(z, expo), oneError);
+		  let df = cmul(expo, cpow(z, csub(expo, oneError)));
+		  return applyNewtonStep(z, cdiv(f, df));
     }
     case 1u: {
 	      let scale = cpow(z, csub(oneError, expo));
@@ -281,8 +292,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       if (!(distance(old, z) > P.rootBoundary)) { break; }
       old = z;
       z = secantStepGpu(z, prev, fz, fPrev);
-      if (P.mandelbrotAddition != 0u) {
-        z = z + seed * 0.5;
+      if (P.mandelbrotAddition != 0.0) {
+        z = z + seed * P.mandelbrotAddition;
       }
       // slide the two-point window forward for the next finite difference
       prev = old;
@@ -297,7 +308,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Reject stalls at non-root stationary points (small step but |f(z)| still
     // large) by flagging them as interior so they don't become bogus roots.
     // Skipped under the Mandelbrot variant, where convergence is not to a root.
-    if (P.mandelbrotAddition == 0u && length(fz) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
+    if (P.mandelbrotAddition == 0.0 && length(fz) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
     outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
     return;
   }
@@ -310,8 +321,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!(distance(old, z) > P.rootBoundary)) { break; }
     old = z;
     z = newtonStepGpu(z, seed);
-    if (P.mandelbrotAddition != 0u) {
-      z = z + seed * 0.5;
+    if (P.mandelbrotAddition != 0.0) {
+      z = z + seed * P.mandelbrotAddition;
     }
     let delta = length(z - old);
     let w = 1.0 / delta;
@@ -322,12 +333,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Same residual guard as the secant path: f/f' can stall below rootBoundry
   // where f' is large without being at a root.  newtonStepGpu never exposes
   // f(z) on its own, so evaluate it once here.  Skipped under Mandelbrot.
-  if (P.mandelbrotAddition == 0u && length(equationGpu(z, seed)) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
+  if (P.mandelbrotAddition == 0.0 && length(equationGpu(z, seed)) >= NEWTON_ROOT_RESIDUAL) { n = P.iterations; }
   outPixels[pixelIdx] = vec4<f32>(hue, f32(n), z.x, z.y);
 }
 `;
 
-var NEWTON_GPU_PARAMS_BYTES = 64;
+var NEWTON_GPU_PARAMS_BYTES = 80;
 var NEWTON_GPU_WORKGROUP_X = 16;
 var NEWTON_GPU_WORKGROUP_Y = 16;
 
@@ -400,7 +411,7 @@ function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount, passIndex
   u[1] = height >>> 0;
   u[2] = (parseInt(iterations, 10) || 0) >>> 0;
   u[3] = mode >>> 0;
-  u[4] = mandelbrotAddition ? 1 : 0;
+  f[4] = mandelbrotAddition;
   u[5] = sampleCount >>> 0;
   u[6] = (passIndex || 0) >>> 0;
   u[7] = secantMethod ? 1 : 0;
@@ -412,6 +423,8 @@ function writeNewtonGPUParams(gpu, width, height, dx, dy, sampleCount, passIndex
   f[13] = parseFloat(img_order) || 0;
   f[14] = complex_error;
   f[15] = rootBoundry;
+  f[16] = damp_re;
+  f[17] = damp_im;
   gpu.device.queue.writeBuffer(gpu.paramsBuf, 0, gpu.paramsBytes);
 }
 
@@ -472,7 +485,7 @@ function focusOnSubmit()
 }
 
 function getSamples() {
-	return Math.min(8, parseInt($('superSamples').value));
+	return parseInt($('superSamples').value);
 }
 
 function iterateNewtonEquation(i, j, equation, derivative) 
@@ -480,16 +493,16 @@ function iterateNewtonEquation(i, j, equation, derivative)
 	var n = 0;
 	var z = new Complex(i,j);
 	var old = new Complex(i,j);
-	
-	z = z.sub( equation(z,i,j).div(derivative(z,i,j)) );
-	
+
+	z = z.sub( dampC.mult( equation(z,i,j).div(derivative(z,i,j)) ) );
+
 	var hue = 0.0;
 	var w = 0.0;
 	while(n < iterations && distance(old,z) > rootBoundry) 
 	{
 		old = z;
-		z = z.sub( equation(z,i,j).div(derivative(z,i,j)) );
-		if (mandelbrotAddition) z = z.add(Complex(i/2.0,j/2.0));	
+		z = z.sub( dampC.mult( equation(z,i,j).div(derivative(z,i,j)) ) );
+		if (mandelbrotAddition) z = z.add(Complex(i*mandelbrotAddition, j*mandelbrotAddition));
 		n++;
 		
 		// normal smoothing
@@ -548,8 +561,8 @@ function iterateSecantEquation(i, j, equation)
 	while (n < iterations && distance(old, z) > rootBoundry)
 	{
 		old = z;
-		z = z.sub( fz.mult(z.sub(prev)).div(fz.sub(fPrev)) );
-		if (mandelbrotAddition) z = z.add(Complex(i/2.0, j/2.0));
+		z = z.sub( dampC.mult( fz.mult(z.sub(prev)).div(fz.sub(fPrev)) ) );
+		if (mandelbrotAddition) z = z.add(Complex(i*mandelbrotAddition, j*mandelbrotAddition));
 
 		// slide the two-point window forward for the next finite difference
 		prev = old;
@@ -585,7 +598,9 @@ function iterateSecantEquation(i, j, equation)
 	return vals;
 }
 
-var mandelbrotAddition = false;
+// Mandelbrot-variant blend: each iteration adds seed * mandelbrotAddition to z.
+// 0 = off (plain Newton/secant); larger values fold in more of the pixel seed.
+var mandelbrotAddition = 0;
 var secantMethod = false;
 var rootBoundry = 0.0001;
 // Max |f(z)| still accepted as a genuine root.  The secant step can shrink
@@ -775,6 +790,9 @@ function draw(superSamples)
 	console.log("mode: " + mode);
 	order = $("real_exponent").value;
 	img_order = parseFloat($("complex_exponent").value);
+	damp_re = parseFloat($("damp_real").value) || 0;
+	damp_im = parseFloat($("damp_imag").value) || 0;
+	dampC = Complex(damp_re, damp_im);
 	iterations = $("txtIterations").value;
 	roots = [];
 
@@ -784,7 +802,7 @@ function draw(superSamples)
 	xRange = [lookAt[0]-zoom[0]/2, lookAt[0]+zoom[0]/2];
 	yRange = [lookAt[1]-zoom[1]/2, lookAt[1]+zoom[1]/2];
 
-	mandelbrotAddition = $("mandelbrot").checked;
+	mandelbrotAddition = parseFloat($("mandelbrot").value) || 0;
 	secantMethod = $("secant").checked;
 
 	// Secant iterates from the equation alone (the derivative is approximated),
@@ -1154,7 +1172,9 @@ function updateHashTag(samples) {
 	var h = 'zoom=' + zoom + '&lookAt=' + lookAt + '&iterations=' + iterations + '&superSamples=' + samples +
 		'&realExponent=' + encodeURIComponent($('real_exponent').value) +
 		'&complexExponent=' + encodeURIComponent($('complex_exponent').value) +
-		'&mandelbrot=' + ($('mandelbrot').checked ? '1' : '0') +
+		'&dampReal=' + encodeURIComponent($('damp_real').value) +
+		'&dampImag=' + encodeURIComponent($('damp_imag').value) +
+		'&mandelbrot=' + encodeURIComponent($('mandelbrot').value) +
 		'&secant=' + ($('secant').checked ? '1' : '0') +
 		'&mode=' + scheme;
 	lastWrittenHash = h;
@@ -1208,8 +1228,18 @@ function readHashTag()
 				redraw = true;
 			} break;
 
+			case 'dampReal': {
+				$('damp_real').value = decodeURIComponent(val);
+				redraw = true;
+			} break;
+
+			case 'dampImag': {
+				$('damp_imag').value = decodeURIComponent(val);
+				redraw = true;
+			} break;
+
 			case 'mandelbrot': {
-				$('mandelbrot').checked = val === '1' || val === 'true';
+				$('mandelbrot').value = decodeURIComponent(val);
 				redraw = true;
 			} break;
 
@@ -1285,11 +1315,11 @@ function divRGB(v, div)
 // wandering orbits fade toward grey.
 function secantInteriorColor(zre, zim)
 {
-	if (brightness > 5) return [255, 255, 255, 255];
+	if (brightness > 4) return [255, 255, 255, 255];
 
 	var m = Math.sqrt(zre*zre + zim*zim);
 	var t = m / (1.0 + m); // compress [0, inf) into [0, 1)
-	var g = Math.round(255 * (1.0 - (0.4/brightness) * Math.sqrt(t)));
+	var g = Math.round(255 * (1.0 - (0.7/brightness) * Math.sqrt(t)));
 	return [g, g, g, 255];
 }
 
@@ -1331,6 +1361,14 @@ function main()
 	}
 
 	$("complex_exponent").onchange = function() {
+		draw(getSamples());
+	}
+
+	$("damp_real").onchange = function() {
+		draw(getSamples());
+	}
+
+	$("damp_imag").onchange = function() {
 		draw(getSamples());
 	}
 
