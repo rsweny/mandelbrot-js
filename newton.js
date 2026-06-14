@@ -813,7 +813,7 @@ function draw(superSamples)
 
 	initialColor = $("colorSlider").value / 100.0;
 	contrast = $("contrastSlider").value / 100.0;
-	brightness = Math.max(1.0, Math.min(10.0, parseFloat($("brightnessSlider").value) || 2.0));
+	brightness = Math.max(1.0, Math.min(20.0, parseFloat($("brightnessSlider").value)));
 	console.log(order + " " + img_order + " iterations: " + iterations + " initialColor: "  + initialColor + " mode: " + mode);
 
 	if ( reInitCanvas ) {
@@ -1329,7 +1329,7 @@ function main()
 	$('viewPNG').onclick = function(event)
 	{
 		var link = document.createElement('a');
-		link.download = `newton-${mode}.png`;
+		link.download = `newton-${mode}-${iterations}-${order}-${img_order}.png`;
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	};
@@ -1386,7 +1386,7 @@ function main()
 	}
 
 	$("brightnessSlider").onchange = function() {
-		brightness = Math.max(1.0, Math.min(5.0, parseFloat($("brightnessSlider").value) || 2.0));
+		brightness = Math.max(1.0, Math.min(20.0, parseFloat($("brightnessSlider").value)));
 		draw(getSamples());
 	}
 
