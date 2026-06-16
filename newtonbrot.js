@@ -131,9 +131,11 @@ var numPoints     = 8192;
 var zoom          = 6;
 var xcen          = 0.1;
 var ycen          = 0;
-var order         = 4.9242613;
-var imgOrder      = 0.4841751596941611;
+var order         = 4.9242;
+var imgOrder      = 0.4841;
 var complexError  = 1.0;
+var damp          = 1.0;
+var dampImg       = 0.0;
 var gradient      = 0.11;
 var brightness    = 3.0;
 var depthRed      = 200;
@@ -195,6 +197,8 @@ function readControls() {
   try { order        = parseFloat($('order').value)        ?? 4.9;  } catch(e){}
   try { imgOrder     = parseFloat($('imgOrder').value)     ?? 0.48; } catch(e){}
   try { complexError = parseFloat($('complexError').value) ?? 1;    } catch(e){}
+  try { damp         = parseFloat($('damp').value)         ?? 1.9;  } catch(e){}
+  try { dampImg      = parseFloat($('dampImg').value)      ?? -0.4; } catch(e){}
   gradient   = $('contrastSlider').value / 100;
   brightness = $('brightnessSlider').value / 100;
   try { depthRed     = parseInt($('depthRed').value, 10)   ?? 200;  } catch(e){}
@@ -216,6 +220,8 @@ function writeControls() {
   $('order').value        = order;
   $('imgOrder').value     = imgOrder;
   $('complexError').value = complexError;
+  $('damp').value         = damp;
+  $('dampImg').value      = dampImg;
   $('contrastSlider').value  = Math.round(gradient * 100);
   $('brightnessSlider').value = Math.round(brightness * 100);
   $('depthRed').value     = depthRed;
@@ -255,6 +261,8 @@ function updateHashTag() {
     'order=' + encodeURIComponent(order),
     'imgOrder=' + encodeURIComponent(imgOrder),
     'complexError=' + encodeURIComponent(complexError),
+    'damp=' + encodeURIComponent(damp),
+    'dampImg=' + encodeURIComponent(dampImg),
     'gradient=' + encodeURIComponent(gradient),
     'brightness=' + encodeURIComponent(brightness),
     'depthRed=' + encodeURIComponent(depthRed),
@@ -320,6 +328,8 @@ function readHashTag() {
   redraw = readHashNumber(params, 'order', function(v) { order = v; }) || redraw;
   redraw = readHashNumber(params, 'imgOrder', function(v) { imgOrder = v; }) || redraw;
   redraw = readHashNumber(params, 'complexError', function(v) { complexError = v; }) || redraw;
+  redraw = readHashNumber(params, 'damp', function(v) { damp = v; }) || redraw;
+  redraw = readHashNumber(params, 'dampImg', function(v) { dampImg = v; }) || redraw;
   redraw = readHashNumber(params, 'gradient', function(v) { gradient = v; }, nonNegative) || redraw;
   redraw = readHashNumber(params, 'contrast', function(v) { gradient = v; }, nonNegative) || redraw;
   redraw = readHashNumber(params, 'brightness', function(v) { brightness = v; }, nonNegative) || redraw;
@@ -418,6 +428,7 @@ function clearAndReset(newRoots) {
 function newtonStep(z, aa, bb) {
   var exp  = new Complex(order, imgOrder);
   var one  = new Complex(1, 0);
+  var dampC = new Complex(damp, dampImg);
   var oerr = new Complex(1, complexError);   // "oneError" — derivative distortion
   var expM1 = exp.sub(oerr);
 
@@ -425,7 +436,7 @@ function newtonStep(z, aa, bb) {
     case 1: { // z^n - 1 = 0  (roots of unity)
       var f  = z.cpow(exp).sub(one);
       var df = exp.mul(z.cpow(expM1));
-      return z.sub(f.div(df));
+      return z.sub(dampC.mul(f.div(df)));
     }
     case 2: { // z^10 + 0.2i*z^n - 1
       var ten  = new Complex(10, 0);
@@ -491,9 +502,9 @@ struct Params {
   mandelbrotAdd: u32,
   doInverse: u32,
   runtotal: u32,
+  dampRe: f32,
+  dampIm: f32,
   _pad0: u32,
-  _pad1: u32,
-  _pad2: u32,
   order: f32,
   imgOrder: f32,
   complexError: f32,
@@ -531,6 +542,7 @@ fn cpow(z: vec2<f32>, w: vec2<f32>) -> vec2<f32> {
 fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
   let expo = vec2<f32>(P.order, P.imgOrder);
   let one = vec2<f32>(1.0, 0.0);
+  let damp = vec2<f32>(P.dampRe, P.dampIm);
   let oerr = vec2<f32>(1.0, P.complexError);
   let expM1 = csub(expo, oerr);
 
@@ -538,7 +550,7 @@ fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
     case 1u: {
       let f = csub(cpow(z, expo), one);
       let df = cmul(expo, cpow(z, expM1));
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
     case 2u: {
       let ten = vec2<f32>(10.0, 0.0);
@@ -546,14 +558,14 @@ fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
       let p2i = vec2<f32>(0.0, 0.2);
       let f = csub(cadd(cpow(z, ten), cmul(p2i, cpow(z, expo))), one);
       let df = cadd(cmul(ten, cpow(z, nine)), cmul(cmul(p2i, expo), cpow(z, expM1)));
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
     case 3u: {
       let two = vec2<f32>(2.0, 0.0);
       let expM2 = csub(expo, two);
       let f = cdiv(csub(cpow(z, expo), one), z);
       let df = cadd(cmul(expM1, cpow(z, expM2)), cpow(z, vec2<f32>(-2.0, 0.0)));
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
     case 4u: {
       let c = vec2<f32>(10.0 + P.order, P.imgOrder);
@@ -561,12 +573,12 @@ fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
       let cm1 = vec2<f32>(10.0 + P.order - 1.0, cm1im);
       let f = cadd(csub(cpow(z, c), z), vec2<f32>(0.1, 0.0));
       let df = csub(cmul(c, cpow(z, cm1)), one);
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
     case 5u: {
       let f = csub(cpow(z, expo), cdiv(one, z));
       let df = cadd(cmul(expo, cpow(z, expM1)), cpow(z, vec2<f32>(-2.0, 0.0)));
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
     default: {
       let three = vec2<f32>(3.0, 0.0);
@@ -577,7 +589,7 @@ fn newtonStepGpu(z: vec2<f32>) -> vec2<f32> {
       let fifteen = vec2<f32>(15.0, 0.0);
       let f = cadd(csub(cadd(csub(cpow(z, expo), cmul(three, cpow(z, five))), cmul(six, cpow(z, three))), cmul(three, z)), three);
       let df = csub(cadd(csub(cmul(expo, cpow(z, expM1)), cmul(fifteen, cpow(z, four))), cmul(eighteen, cpow(z, vec2<f32>(2.0, 0.0)))), three);
-      return csub(z, cdiv(f, df));
+      return csub(z, cmul(damp, cdiv(f, df)));
     }
   }
 }
@@ -720,7 +732,9 @@ function writeOrbitGPUParams(gpu, jobCount, maxDepth) {
   u[6] = mandelbrotAdd ? 1 : 0;
   u[7] = doInverse ? 1 : 0;
   u[8] = runtotal >>> 0;
-  u[9] = u[10] = u[11] = 0;
+  f[9]  = damp;
+  f[10] = dampImg;
+  u[11] = 0;
   f[12] = order;
   f[13] = imgOrder;
   f[14] = complexError;
@@ -1085,7 +1099,7 @@ function finishNextPoints() {
     }
   }
 
-  if (runtotal % 5000 === 0) resetSmartPoints();
+  if (runtotal % 400 === 0) resetSmartPoints();
 }
 
 function nextPointsCPU() {
@@ -1215,10 +1229,10 @@ function findPeak(arr) {
   for (var i = 0; i < arr.length; i++) {
     if (arr[i] > max) max = arr[i];
   }
-  if (gradient <= 0.05) return Math.pow(max, 0.3);
-  if (gradient <= 0.1)  return Math.pow(max, 0.4);
-  if (gradient <= 0.2)  return Math.pow(max, 0.7);
-  if (gradient <= 0.3)  return Math.pow(max, 0.9);
+  if (gradient <= 0.05) return Math.pow(max, 0.95);
+  if (gradient <= 0.1)  return Math.pow(max, 0.8);
+  if (gradient <= 0.2)  return Math.pow(max, 0.75);
+  if (gradient <= 0.3)  return Math.pow(max, 0.7);
   return max;
 }
 
@@ -1318,9 +1332,11 @@ function resetAndDraw() {
   zoom         = 6;
   xcen         = 0.1;
   ycen         = 0;
-  order        = 4.9242613;
-  imgOrder     = 0.4841751596941611;
+  order        = 4.9242;
+  imgOrder     = 0.4841;
   complexError = 1.0;
+  damp         = 1;
+  dampImg      = 0;
   gradient     = 0.11;
   brightness   = 3.0;
   depthRed     = 200;
@@ -1430,7 +1446,7 @@ function main() {
   $('resetButton').onclick = resetAndDraw;
   $('viewPNG').onclick = function() {
     const link = document.createElement('a');
-    link.download = `newtonbrot-${runtotal}.png`;
+    link.download = `newtonbrot-${order}-${imgOrder}-${runtotal}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };
@@ -1438,7 +1454,7 @@ function main() {
   // Re-render on any control change.  Depth changes affect orbit length, and
   // viewport changes affect where cached orbits accumulate, so both clear the
   // current histogram and restart rendering without rebuilding the root list.
-  const redrawWithRoots  = ['order','imgOrder','complexError','rootBoundary','algMode'];
+  const redrawWithRoots  = ['order','imgOrder','complexError','damp','dampImg','rootBoundary','algMode'];
   const redrawNoRoots    = ['zoom','xcen','ycen','depthRed','depthGreen','depthBlue','palIndex'];
   const toggleWithRoots  = ['mandelbrotAdd'];
   const toggleNoRoots    = ['doInverse','byStructure'];
