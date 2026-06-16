@@ -1229,43 +1229,44 @@ function findPeak(arr) {
   for (var i = 0; i < arr.length; i++) {
     if (arr[i] > max) max = arr[i];
   }
-  if (gradient <= 0.05) return Math.pow(max, 0.95);
-  if (gradient <= 0.1)  return Math.pow(max, 0.8);
-  if (gradient <= 0.2)  return Math.pow(max, 0.75);
-  if (gradient <= 0.3)  return Math.pow(max, 0.7);
   return max;
 }
 
+// Log-compressed tone mapping.  Histogram counts span an enormous dynamic
+// range: a few dense cores can be thousands of times brighter than the faint
+// filaments around them.  Normalizing on log(1+count) / log(1+peak) squashes
+// that range into [0,1] so the faint detail survives instead of being crushed
+// by the hotspots.  The two user inputs then layer on cleanly:
+//   contrast   -> gamma exponent on the normalized value (higher = punchier,
+//                 lower = flatter/lifted; ~1.0 leaves the pure log curve)
+//   brightness -> linear gain applied afterwards
 function updateHistogram() {
-  var maxR = findPeak(imgRed);
-  var maxG = findPeak(imgGreen);
-  var maxB = findPeak(imgBlue);
-  var maxA = findPeak(imgAlpha);
+  var gamma = gradient * 10;
 
-  var gmR = Math.pow(maxR, gradient);
-  var gmG = Math.pow(maxG, gradient);
-  var gmB = Math.pow(maxB, gradient);
-  var gmA = Math.pow(maxA, gradient);
-  if (gmA === 0) gmA = 1;
+  var logPeakR = Math.log1p(findPeak(imgRed));
+  var logPeakG = Math.log1p(findPeak(imgGreen));
+  var logPeakB = Math.log1p(findPeak(imgBlue));
+  var logPeakA = Math.log1p(findPeak(imgAlpha));
 
   var total = ximlen * yimlen;
   var d = imageData.data;
 
   for (var idx = 0; idx < total; idx++) {
     var r = 0, g = 0, b = 0;
-    var a = imgAlpha[idx];
 
     if (byStructure) {
-      if (a > 0) {
-        var z = Math.pow(a, gradient) / gmA;
-        r = (imgRed[idx]   * z * brightness / a) | 0;
-        g = (imgGreen[idx] * z * brightness / a) | 0;
-        b = (imgBlue[idx]  * z * brightness / a) | 0;
+      var a = imgAlpha[idx];
+      if (a > 0 && logPeakA > 0) {
+        // z: log-normalized hit density -> luminance; colour is the per-hit average
+        var z = Math.pow(Math.log1p(a) / logPeakA, gamma) * brightness;
+        r = (imgRed[idx]   / a * z) | 0;
+        g = (imgGreen[idx] / a * z) | 0;
+        b = (imgBlue[idx]  / a * z) | 0;
       }
     } else {
-      if (gmR > 0) r = (brightness * Math.pow(imgRed[idx],   gradient) / gmR * 255) | 0;
-      if (gmG > 0) g = (brightness * Math.pow(imgGreen[idx], gradient) / gmG * 255) | 0;
-      if (gmB > 0) b = (brightness * Math.pow(imgBlue[idx],  gradient) / gmB * 255) | 0;
+      if (logPeakR > 0) r = (brightness * Math.pow(Math.log1p(imgRed[idx])   / logPeakR, gamma) * 255) | 0;
+      if (logPeakG > 0) g = (brightness * Math.pow(Math.log1p(imgGreen[idx]) / logPeakG, gamma) * 255) | 0;
+      if (logPeakB > 0) b = (brightness * Math.pow(Math.log1p(imgBlue[idx])  / logPeakB, gamma) * 255) | 0;
     }
 
     if (r > 255) r = 255;
